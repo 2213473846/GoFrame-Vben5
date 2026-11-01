@@ -2,7 +2,7 @@
 
 基于 **GoFrame v2** 与 **Vue Vben Admin v5** 的后台管理脚手架：后端负责认证、用户层级与数据权限、后端下发动态路由、日志与在线会话；前端基于 Vben Admin（Element Plus 版本）实现登录、用户管理、路由管理、日志管理与在线用户监控。
 
-- 仓库地址：<https://github.com/2213473846/demo>
+- 仓库地址：<https://github.com/2213473846/GoFrame-Vben5>
 - 后端 API 文档（启动后）：<http://127.0.0.1:8000/swagger>
 - 前端默认账号：`admin / 123456`
 
@@ -75,8 +75,8 @@
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/2213473846/demo.git
-cd demo
+git clone https://github.com/2213473846/GoFrame-Vben5.git
+cd GoFrame-Vben5
 ```
 
 ### 2. 准备 MySQL 与 Redis
