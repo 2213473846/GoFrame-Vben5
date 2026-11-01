@@ -1,0 +1,11 @@
+# 构建镜像时忽略的内容
+.git
+.agents
+main.exe
+temp/
+output/
+manifest/output/
+node_modules/
+vue-vben-admin/
+*.log
+*.md

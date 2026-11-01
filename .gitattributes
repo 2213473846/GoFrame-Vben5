@@ -1,0 +1,13 @@
+# 只用于 GitHub 语言统计, 不影响代码
+* linguist-language=Go
+*.vue linguist-language=Vue
+*.ts linguist-language=TypeScript
+*.js linguist-language=JavaScript
+*.yaml linguist-language=YAML
+*.yml linguist-language=YAML
+*.md linguist-language=Markdown
+*.json linguist-language=JSON
+*.sql linguist-language=SQL
+*.scss linguist-language=SCSS
+*.css linguist-language=CSS
+*.html linguist-language=HTML

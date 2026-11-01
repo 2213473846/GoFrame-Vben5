@@ -1,0 +1,31 @@
+.buildpath
+.hgignore.swp
+.project
+.orig
+.swp
+.idea/
+.settings/
+.vscode/
+bin/
+**/.DS_Store
+gf
+main
+main.exe
+output/
+manifest/output/
+temp/
+temp.yaml
+bin
+**/config/config.yaml
+
+# 前端构建产物与依赖
+node_modules/
+**/dist/
+**/dist.zip
+**/.turbo/
+**/.vite/
+**/.pnpm-store/
+pnpm-debug.log*
+
+# 本地 AI 助手技能配置(不入库)
+.agents/

@@ -1,0 +1,38 @@
+# 前端静态资源 + 反向代理示例
+# 用法: 将 vue-vben-admin/apps/web-ele/dist 作为静态根目录, 后端地址按需修改
+server {
+    listen       80;
+    server_name  _;
+
+    # 前端构建产物目录
+    root   /usr/share/nginx/html;
+    index  index.html;
+
+    # 前端为 hash 路由, 兜底到 index.html 即可
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # 后端接口: 前端 VITE_GLOB_API_URL=/api, 这里去掉 /api 前缀转发给 GoFrame
+    location /api/ {
+        proxy_pass         http://127.0.0.1:8000/;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Upgrade           $http_upgrade;
+        proxy_set_header   Connection        "upgrade";
+    }
+
+    # Swagger UI 与 OpenAPI 描述文件(按需开放, 生产环境建议关闭)
+    location /swagger {
+        proxy_pass http://127.0.0.1:8000/swagger;
+        proxy_set_header Host $host;
+    }
+
+    location /api.json {
+        proxy_pass http://127.0.0.1:8000/api.json;
+        proxy_set_header Host $host;
+    }
+}

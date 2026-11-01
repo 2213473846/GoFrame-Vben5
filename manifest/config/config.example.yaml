@@ -1,0 +1,33 @@
+# 复制为同目录下的 config.yaml 后按需修改:
+#   cp manifest/config/config.example.yaml manifest/config/config.yaml
+# 说明: config.yaml 已被 .gitignore 忽略, 避免把生产账号密码提交到仓库。
+#
+# GoFrame 配置文档:
+#   server: https://goframe.org/docs/web/server-config-file-template
+#   logger: https://goframe.org/docs/core/glog-config
+#   database: https://goframe.org/docs/core/gdb-config-file
+#   redis: https://goframe.org/docs/core/gredis-config
+
+server:
+  address:     ":8000"       # 服务监听地址
+  openapiPath: "/api.json"   # OpenAPI 描述文件
+  swaggerPath: "/swagger"    # Swagger UI
+
+logger:
+  level : "all"
+  stdout: true
+
+database:
+  logger:
+    level: "all"
+    stdout: true
+  default:
+    # 格式: mysql:用户名:密码@tcp(地址:端口)/数据库名
+    # 生产环境建议改为环境隔离的独立账号, 不要使用 root
+    link: "mysql:root:123456@tcp(127.0.0.1:3306)/vben_admin"
+
+redis:
+  default:
+    address: "127.0.0.1:6379"
+    db: 0
+    # pass: "your-redis-password"  # 有密码时放开

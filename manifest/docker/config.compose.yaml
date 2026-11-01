@@ -1,0 +1,20 @@
+# Docker Compose 内的后端配置: 数据库/Redis 使用 compose 服务名
+server:
+  address:     ":8000"
+  openapiPath: "/api.json"
+  swaggerPath: "/swagger"
+
+logger:
+  level : "all"
+  stdout: true
+
+database:
+  logger:
+    level: "none"
+  default:
+    link: "mysql:root:123456@tcp(mysql:3306)/vben_admin"
+
+redis:
+  default:
+    address: "redis:6379"
+    db: 0

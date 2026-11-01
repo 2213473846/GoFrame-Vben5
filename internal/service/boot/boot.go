@@ -1,0 +1,97 @@
+﻿package boot
+
+import (
+	"context"
+
+	"demo/internal/consts"
+	"demo/internal/dao"
+	"demo/internal/model/do"
+	menusvc "demo/internal/service/menu"
+
+	"github.com/gogf/gf/v2/errors/gerror"
+	"golang.org/x/crypto/bcrypt"
+)
+
+// Run 服务启动前的初始化(幂等): 确保种子账号与内置菜单存在
+// 种子账号: admin/123456(超管), agent01/123456(管理员), user01/123456(用户)
+func Run(ctx context.Context) (err error) {
+	if err = seedUsers(ctx); err != nil {
+		return err
+	}
+	if err = seedMenus(ctx); err != nil {
+		return err
+	}
+	// 日志管理菜单独立幂等 seed(存量数据库也能增量生效)
+	if err = menusvc.New().SeedLogs(ctx); err != nil {
+		return err
+	}
+	// 系统监控菜单独立幂等 seed
+	return menusvc.New().SeedMonitor(ctx)
+}
+
+// seedMenus 初始化内置菜单; 首次初始化时给存量非超管用户下发默认菜单
+func seedMenus(ctx context.Context) (err error) {
+	menuCount, err := dao.SysMenu.Ctx(ctx).Count()
+	if err != nil {
+		return gerror.Wrap(err, "初始化菜单失败: 数据库不可用, 请先执行 go run ./utility/migratemenu")
+	}
+	if menuCount > 0 {
+		return nil
+	}
+	if err = menusvc.New().Seed(ctx); err != nil {
+		return err
+	}
+	// 仅首次初始化菜单时下发默认授权, 之后由超管在界面上管理
+	return menusvc.New().SeedGrants(ctx)
+}
+
+// seedUsers 初始化种子账号
+func seedUsers(ctx context.Context) (err error) {
+	count, err := dao.SysUser.Ctx(ctx).Count()
+	if err != nil {
+		return gerror.Wrap(err, "初始化失败: 数据库不可用, 请先执行 go run ./utility/initdb")
+	}
+	if count > 0 {
+		return nil
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte("123456"), bcrypt.DefaultCost)
+	if err != nil {
+		return gerror.Wrap(err, "密码加密失败")
+	}
+	adminId, err := dao.SysUser.Ctx(ctx).Data(do.SysUser{
+		Pid:      0,
+		Username: "admin",
+		Password: string(hash),
+		RealName: "超级管理员",
+		Role:     consts.RoleSuperAdmin,
+		Status:   1,
+		Remark:   "系统内置",
+	}).InsertAndGetId()
+	if err != nil {
+		return gerror.Wrap(err, "初始化种子账号失败")
+	}
+	agentId, err := dao.SysUser.Ctx(ctx).Data(do.SysUser{
+		Pid:      adminId,
+		Username: "agent01",
+		Password: string(hash),
+		RealName: "代理一号",
+		Role:     consts.RoleAdmin,
+		Status:   1,
+		Remark:   "演示代理",
+	}).InsertAndGetId()
+	if err != nil {
+		return gerror.Wrap(err, "初始化种子账号失败")
+	}
+	if _, err = dao.SysUser.Ctx(ctx).Data(do.SysUser{
+		Pid:      agentId,
+		Username: "user01",
+		Password: string(hash),
+		RealName: "用户一号",
+		Role:     consts.RoleUser,
+		Status:   1,
+		Remark:   "演示用户",
+	}).InsertAndGetId(); err != nil {
+		return gerror.Wrap(err, "初始化种子账号失败")
+	}
+	return nil
+}
