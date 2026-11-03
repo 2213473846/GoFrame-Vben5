@@ -1,13 +1,15 @@
 <script lang="ts" setup>
 import type { OperationLogItem } from '#/api/system/log';
+import type { DictFallbackItem } from '#/composables/useDict';
 
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, ref } from 'vue';
 
 import { useUserStore } from '@vben/stores';
 
 import {
   ElButton,
   ElInput,
+  ElMessage,
   ElOption,
   ElPagination,
   ElSelect,
@@ -16,9 +18,18 @@ import {
   ElTag,
 } from 'element-plus';
 
+import { downloadExportApi } from '#/api/system/export';
 import { getOperationLogListApi } from '#/api/system/log';
+import DictTag from '#/components/dict-tag/index.vue';
+import { useTable } from '#/composables/useTable';
 
 defineOptions({ name: 'SystemOperationLog' });
+
+// 日志状态字典兜底文案(字典未配置时回退), 展示交给 DictTag 组件
+const logStatusFallback: Record<string, DictFallbackItem> = {
+  '0': { label: '失败', tagColor: 'danger' },
+  '1': { label: '成功', tagColor: 'success' },
+};
 
 const userStore = useUserStore();
 // 请求方法列仅超级管理员可见
@@ -26,52 +37,45 @@ const isSuperAdmin = computed(
   () => userStore.userInfo?.roles?.includes('super_admin') ?? false,
 );
 
-const loading = ref(false);
-const items = ref<OperationLogItem[]>([]);
-const total = ref(0);
-const query = reactive({
-  page: 1,
-  pageSize: 10,
-  status: -1 as number,
-  username: '',
+// 列表状态(分页/加载/查询条件由 useTable 统一管理)
+const {
+  fetchList,
+  handlePageChange,
+  handlePageSizeChange,
+  handleReset,
+  handleSearch,
+  items,
+  loading,
+  query,
+  total,
+} = useTable<OperationLogItem, { status: number; username: string }>({
+  async fetch(q) {
+    return getOperationLogListApi({
+      page: q.page,
+      pageSize: q.pageSize,
+      status: q.status,
+      username: q.username || undefined,
+    });
+  },
+  defaultQuery: { status: -1, username: '' },
 });
 
-async function fetchList() {
-  loading.value = true;
+// 导出当前筛选条件下的操作日志
+const exporting = ref(false);
+async function handleExport(format: 'csv' | 'xlsx') {
+  exporting.value = true;
   try {
-    const res = await getOperationLogListApi({
-      page: query.page,
-      pageSize: query.pageSize,
-      status: query.status,
-      username: query.username || undefined,
+    await downloadExportApi('/operationlog/export', {
+      format,
+      params: {
+        status: query.status,
+        username: query.username || undefined,
+      },
     });
-    items.value = res.items;
-    total.value = res.total;
+    ElMessage.success('导出已开始');
   } finally {
-    loading.value = false;
+    exporting.value = false;
   }
-}
-
-function handleSearch() {
-  query.page = 1;
-  fetchList();
-}
-
-function handleReset() {
-  query.username = '';
-  query.status = -1;
-  handleSearch();
-}
-
-function handlePageSizeChange(size: number) {
-  query.pageSize = size;
-  query.page = 1;
-  fetchList();
-}
-
-function handlePageChange(page: number) {
-  query.page = page;
-  fetchList();
 }
 
 const methodTagType = (method: string) => {
@@ -80,8 +84,6 @@ const methodTagType = (method: string) => {
   if (method === 'DELETE') return 'danger';
   return 'info';
 };
-
-onMounted(fetchList);
 </script>
 
 <template>
@@ -103,6 +105,12 @@ onMounted(fetchList);
         <ElButton type="primary" @click="handleSearch">查询</ElButton>
         <ElButton @click="handleReset">重置</ElButton>
         <div class="flex-1"></div>
+        <ElButton :loading="exporting" @click="handleExport('xlsx')">
+          导出 Excel
+        </ElButton>
+        <ElButton :loading="exporting" @click="handleExport('csv')">
+          导出 CSV
+        </ElButton>
         <ElButton @click="fetchList">刷新</ElButton>
       </div>
 
@@ -136,9 +144,11 @@ onMounted(fetchList);
         <ElTableColumn prop="os" label="操作系统" min-width="105" />
         <ElTableColumn label="操作状态" width="95">
           <template #default="{ row }">
-            <ElTag :type="row.status === 1 ? 'success' : 'danger'">
-              {{ row.status === 1 ? '成功' : '失败' }}
-            </ElTag>
+            <DictTag
+              type="sys_log_type"
+              :value="row.status"
+              :fallback="logStatusFallback"
+            />
           </template>
         </ElTableColumn>
         <ElTableColumn

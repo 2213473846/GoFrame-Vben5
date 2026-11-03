@@ -19,12 +19,12 @@ type RouteMeta struct {
 
 // RouteNode 路由节点
 type RouteNode struct {
-	Name      string        `json:"name"`
-	Path      string        `json:"path"`
-	Component string        `json:"component,omitempty"`
-	Redirect  string        `json:"redirect,omitempty"`
-	Meta      *RouteMeta    `json:"meta"`
-	Children  []*RouteNode  `json:"children,omitempty"`
+	Name      string       `json:"name"`
+	Path      string       `json:"path"`
+	Component string       `json:"component,omitempty"`
+	Redirect  string       `json:"redirect,omitempty"`
+	Meta      *RouteMeta   `json:"meta"`
+	Children  []*RouteNode `json:"children,omitempty"`
 }
 
 // AllRes 路由树(数组直接作为 data 返回)

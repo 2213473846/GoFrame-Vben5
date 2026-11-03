@@ -31,3 +31,88 @@ redis:
     address: "127.0.0.1:6379"
     db: 0
     # pass: "your-redis-password"  # 有密码时放开
+
+# 登录安全 / 设备数限制
+security:
+  sessionLimit:
+    # 是否启用登录设备数限制; 关闭后同一账号可无限并发在线
+    enabled: true
+    # 全局默认单用户最大在线设备数, sys_user.max_devices 为空时生效
+    defaultMaxDevices: 1
+    # 被新设备顶替时的提示
+    kickedMessage: "账号已在其他设备登录, 请重新登录"
+    # 超出允许的设备数上限时的提示
+    limitExceededMessage: "已超出允许的登录设备数, 请重新登录"
+  # 登录失败锁定 / 图形验证码
+  loginGuard:
+    # 是否启用失败计数与锁定
+    enabled: true
+    # 失败计数固定窗口(秒): 首次失败开始计时, 窗口内失败累加, 不因后续失败而延长
+    failWindowSeconds: 600
+    # 连续失败达到该次数后锁定(按用户名、按 IP 两个维度分别计数)
+    lockThreshold: 5
+    # 锁定持续时间(秒)
+    lockSeconds: 900
+    # 失败次数达到该值后, 下一次登录必须携带图形验证码(低于 lockThreshold)
+    captchaThreshold: 2
+    # 图形验证码有效期(秒), 一次性使用
+    captchaTTLSeconds: 120
+    # 锁定时提示(用户名/IP 维度统一文案, 不暴露账号是否存在)
+    lockedMessage: "登录失败次数过多, 请稍后重试"
+    # 需要验证码时的提示
+    captchaRequiredMessage: "登录失败次数较多, 请输入图形验证码后重试"
+    # 验证码错误时的提示
+    captchaInvalidMessage: "验证码错误, 请重新输入"
+  # 密码策略(创建用户/重置密码/修改密码/识别存量弱密码统一使用)
+  password:
+    minLength: 6
+    maxLength: 32
+    requireLetter: false
+    requireDigit: true
+    requireSpecial: false
+    # 自定义策略提示文案; 留空时按上面的规则自动拼接
+    policyMessage: "密码长度需为6-32位, 且至少包含1个数字"
+    # 首次登录强制改密时的拦截提示
+    changeRequiredMessage: "请先修改初始密码后再使用系统"
+
+# 数据字典
+dict:
+  cache:
+    # 是否启用服务端字典内存缓存(前端 useDict 另有本地缓存)
+    enabled: true
+    # 缓存有效期(秒), 字典写操作会立即清除缓存
+    ttlSeconds: 300
+
+# 列表导出
+export:
+  # 导出分批查询批次大小(行), 避免大数据量一次性加载到内存
+  batchSize: 2000
+  # 单次导出行数上限(运行时可由 sys_config 的 export.maxRows 覆盖), 0 表示不限制
+  maxRows: 500000
+
+# 系统参数配置(sys_config)
+# 仅存放运行时可变的业务/展示参数; 安全类参数(登录失败阈值/锁定窗口/验证码阈值/
+# 密码复杂度/会话上限)必须保留在 security 段, 不得搬入 sys_config
+sysConfig:
+  cache:
+    # 是否启用服务端参数内存缓存(写操作会立即清除缓存)
+    enabled: true
+    # 缓存有效期(秒)
+    ttlSeconds: 300
+
+# 用户 Excel 导入
+import:
+  # 单个导入文件大小上限(字节), 默认 5MB
+  maxFileBytes: 5242880
+  # 单次导入最大数据行数(不含表头/说明/示例行)
+  maxRows: 5000
+  # 每批处理行数, 控制单次内存占用
+  batchSize: 200
+
+# 工作台(兜底默认值; 运行时优先读取 sys_config 的 dashboard.trendDays / dashboard.recentLimit)
+dashboard:
+  # 趋势天数(1-90)
+  trendDays: 7
+  # 最近动态条数(1-50)
+  recentLimit: 8
+

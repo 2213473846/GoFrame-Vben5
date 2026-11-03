@@ -4,10 +4,10 @@ import "github.com/gogf/gf/v2/frame/g"
 
 // LoginLogListReq 登录日志列表
 type LoginLogListReq struct {
-	g.Meta `path:"/loginlog/list" method:"get" tags:"LoginLog" summary:"登录日志列表"`
+	g.Meta   `path:"/loginlog/list" method:"get" tags:"LoginLog" summary:"登录日志列表"`
 	Page     int    `p:"page" d:"1"`
 	PageSize int    `p:"pageSize" d:"10"`
-	Username string `p:"username"` // 用户名模糊查询
+	Username string `p:"username"`      // 用户名模糊查询
 	Status   int    `p:"status" d:"-1"` // -1=全部 1=成功 0=失败
 }
 

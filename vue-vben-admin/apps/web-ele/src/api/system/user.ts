@@ -1,3 +1,5 @@
+import type { PageParams, PageResult } from '#/api/types';
+
 import { requestClient } from '#/api/request';
 
 export interface SystemUserListItem {
@@ -10,22 +12,21 @@ export interface SystemUserListItem {
   realName: string;
   remark: string;
   role: string;
+  roleIds: number[];
+  roleNames: string[];
   status: number;
   username: string;
+  /** 最大同时在线设备数; 仅超管可见, 其他角色为 null */
+  maxDevices?: null | number;
 }
 
-export interface SystemUserListParams {
-  page?: number;
-  pageSize?: number;
+export interface SystemUserListParams extends PageParams {
   realName?: string;
   role?: string;
   username?: string;
 }
 
-export interface SystemUserListResult {
-  items: SystemUserListItem[];
-  total: number;
-}
+export type SystemUserListResult = PageResult<SystemUserListItem>;
 
 /**
  * 用户列表(数据权限: 超管全部, 管理员仅子孙)
@@ -38,10 +39,12 @@ export async function getUserListApi(params: SystemUserListParams) {
  * 创建管理员/用户
  */
 export async function createUserApi(data: {
+  maxDevices?: number;
   password: string;
   realName?: string;
   remark?: string;
   role: string;
+  roleIds?: number[];
   username: string;
 }) {
   return requestClient.post<{ id: number }>('/user/create', data);
@@ -53,10 +56,12 @@ export async function createUserApi(data: {
 export async function updateUserApi(data: {
   avatar?: string;
   id: number;
+  maxDevices?: number;
   password?: string;
   realName?: string;
   remark?: string;
   role?: string;
+  roleIds?: number[];
   status?: number;
   username?: string;
 }) {
@@ -83,15 +88,12 @@ export interface RecycleItem {
 /**
  * 回收站列表(已软删用户)
  */
-export async function getRecycleListApi(params: {
-  page?: number;
-  pageSize?: number;
-  username?: string;
-}) {
-  return requestClient.get<{ items: RecycleItem[]; total: number }>(
-    '/user/recycle',
-    { params },
-  );
+export async function getRecycleListApi(
+  params: PageParams & { username?: string },
+) {
+  return requestClient.get<PageResult<RecycleItem>>('/user/recycle', {
+    params,
+  });
 }
 
 /**

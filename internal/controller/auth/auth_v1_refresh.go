@@ -5,8 +5,6 @@ import (
 
 	"demo/api/auth/v1"
 	"demo/internal/consts"
-	"demo/internal/service/middleware"
-	onlinesvc "demo/internal/service/online"
 
 	"github.com/gogf/gf/v2/frame/g"
 )
@@ -18,11 +16,9 @@ func (c *ControllerV1) Refresh(ctx context.Context, req *v1.RefreshReq) (res *v1
 	if err != nil {
 		return nil, err
 	}
-	// 续期 refreshToken Cookie
+	// refreshToken 不轮换, 同一浏览器多标签共享 Cookie 并发刷新时保持稳定
 	setRefreshTokenCookie(r, out.RefreshToken)
-	// 刷新成功: 移除旧 token 的在线会话, 记录新会话
-	onlinesvc.Drop(ctx, middleware.GetBearerToken(r))
-	onlinesvc.RecordFromRequest(r, out.AccessToken, out.Identity)
+	// 在线会话按 sessionId 维护, 刷新只续期, 不新建会话记录
 	r.Response.Write(out.AccessToken)
 	return nil, nil
 }

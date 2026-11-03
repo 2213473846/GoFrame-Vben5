@@ -1,3 +1,5 @@
+import type { PageParams, PageResult } from '#/api/types';
+
 import { requestClient } from '#/api/request';
 
 export interface OnlineUserItem {
@@ -6,22 +8,22 @@ export interface OnlineUserItem {
   location: string;
   loginTime: string;
   os: string;
+  offlineAt?: string;
+  offlineReason?: string;
   realName: string;
   role: string;
+  sessionId: string;
+  /** 1=在线 0=已下线(被顶替/超出设备数上限/管理员强退/退出) */
+  status: number;
   userId: number;
   username: string;
 }
 
-export interface OnlineUserListParams {
-  page?: number;
-  pageSize?: number;
+export interface OnlineUserListParams extends PageParams {
   username?: string;
 }
 
-export interface OnlineUserListResult {
-  items: OnlineUserItem[];
-  total: number;
-}
+export type OnlineUserListResult = PageResult<OnlineUserItem>;
 
 /**
  * 在线用户列表(数据范围: 超管全部, 管理员自己+新增用户, 用户仅自己)

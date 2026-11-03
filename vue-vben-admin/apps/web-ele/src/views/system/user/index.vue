@@ -1,10 +1,10 @@
 <script lang="ts" setup>
-import type {
-  SystemUserListItem,
-  SystemUserListResult,
-} from '#/api/system/user';
+import type { SystemUserListItem } from '#/api/system/user';
+import type { DictFallbackItem } from '#/composables/useDict';
 
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
+
+import { useUserStore } from '@vben/stores';
 
 import {
   ElButton,
@@ -12,13 +12,16 @@ import {
   ElForm,
   ElFormItem,
   ElInput,
+  ElInputNumber,
   ElMessage,
   ElMessageBox,
   ElOption,
   ElSelect,
+  ElSwitch,
   ElTable,
   ElTableColumn,
   ElTag,
+  ElUpload,
 } from 'element-plus';
 
 import {
@@ -31,8 +34,27 @@ import {
   updateUserApi,
 } from '#/api/system/user';
 import type { RecycleItem } from '#/api/system/user';
+import { getRoleListApi } from '#/api/system/role';
+import type { SystemRoleItem } from '#/api/system/role';
+import { downloadUserImportTemplateApi, importUsersApi } from '#/api/system/import';
+import type { ImportResult } from '#/api/system/import';
+import { downloadExportApi } from '#/api/system/export';
+import DictTag from '#/components/dict-tag/index.vue';
+import { useTable } from '#/composables/useTable';
 
 defineOptions({ name: 'SystemUser' });
+
+// 用户状态字典兜底文案(字典未配置时回退), 展示交给 DictTag 组件
+const userStatusFallback: Record<string, DictFallbackItem> = {
+  '0': { label: '禁用', tagColor: 'danger' },
+  '1': { label: '启用', tagColor: 'success' },
+};
+
+const userStore = useUserStore();
+// 最大在线设备数仅超级管理员可查看/编辑; 接口层同样校验, 前端隐藏只是体验优化
+const isSuperAdmin = computed(
+  () => userStore.userInfo?.roles?.includes('super_admin') ?? false,
+);
 
 const roleOptions = [
   { label: '管理员', value: 'admin' },
@@ -51,42 +73,94 @@ const roleText = (role: string) => {
   return '用户';
 };
 
-// 列表状态
-const loading = ref(false);
-const items = ref<SystemUserListItem[]>([]);
-const total = ref(0);
-const query = reactive({
-  page: 1,
-  pageSize: 10,
-  username: '',
-  role: '',
+// 列表状态(分页/加载/查询条件由 useTable 统一管理)
+const {
+  fetchList,
+  handlePageChange,
+  handleReset,
+  handleSearch,
+  items,
+  loading,
+  query,
+  total,
+} = useTable<SystemUserListItem, { role: string; username: string }>({
+  async fetch(q) {
+    return getUserListApi({
+      page: q.page,
+      pageSize: q.pageSize,
+      role: q.role || undefined,
+      username: q.username || undefined,
+    });
+  },
+  defaultQuery: { role: '', username: '' },
 });
 
-async function fetchList() {
-  loading.value = true;
+// 导出当前筛选条件下的用户列表(后端复用列表查询与数据权限)
+const exporting = ref(false);
+async function handleExport(format: 'csv' | 'xlsx') {
+  exporting.value = true;
   try {
-    const res = await getUserListApi({
-      page: query.page,
-      pageSize: query.pageSize,
-      role: query.role || undefined,
-      username: query.username || undefined,
+    await downloadExportApi('/user/export', {
+      format,
+      params: {
+        role: query.role || undefined,
+        username: query.username || undefined,
+      },
     });
-    const data = res as SystemUserListResult;
-    items.value = data.items;
-    total.value = data.total;
+    ElMessage.success('导出已开始');
   } finally {
-    loading.value = false;
+    exporting.value = false;
   }
 }
 
-function handleSearch() {
-  query.page = 1;
-  fetchList();
+// Excel 导入(部分成功; 默认不回滚, 可勾选全量回滚)
+const importVisible = ref(false);
+const importLoading = ref(false);
+const importFile = ref<File>();
+const importAtomic = ref(false);
+const importResult = ref<ImportResult>();
+
+function openImport() {
+  importFile.value = undefined;
+  importAtomic.value = false;
+  importResult.value = undefined;
+  importVisible.value = true;
 }
 
-function handlePageChange(page: number) {
-  query.page = page;
-  fetchList();
+function handleImportFileChange(uploadFile: any) {
+  importFile.value = uploadFile?.raw;
+  importResult.value = undefined;
+}
+
+function handleImportFileRemove() {
+  importFile.value = undefined;
+}
+
+async function handleDownloadTemplate() {
+  await downloadUserImportTemplateApi();
+  ElMessage.success('模板已开始下载');
+}
+
+async function handleImport() {
+  if (!importFile.value) {
+    ElMessage.warning('请先选择 Excel 文件');
+    return;
+  }
+  importLoading.value = true;
+  try {
+    const res = await importUsersApi(importFile.value, importAtomic.value);
+    importResult.value = res;
+    if (res.failed === 0) {
+      ElMessage.success(`导入完成: 成功 ${res.success} 条`);
+    } else {
+      ElMessage.warning(
+        `导入完成: 成功 ${res.success} 条, 失败 ${res.failed} 条`,
+      );
+    }
+    fetchList();
+  } finally {
+    importLoading.value = false;
+  }
 }
 
 // 新增/编辑对话框
@@ -95,22 +169,39 @@ const saving = ref(false);
 const isEdit = ref(false);
 const form = reactive({
   id: 0,
+  maxDevices: 0,
   password: '',
   realName: '',
   remark: '',
   role: 'user',
+  roleIds: [] as number[],
   status: 1,
   username: '',
 });
+
+// 功能角色(RBAC)选项
+const rbacRoleOptions = ref<SystemRoleItem[]>([]);
+
+async function fetchRoles() {
+  try {
+    const res = await getRoleListApi();
+    rbacRoleOptions.value = (res as { items: SystemRoleItem[] }).items ?? [];
+  } catch {
+    // 无权限或加载失败时保持空选项, 保存时后端会校验
+    rbacRoleOptions.value = [];
+  }
+}
 
 function openCreate() {
   isEdit.value = false;
   Object.assign(form, {
     id: 0,
+    maxDevices: 0,
     password: '',
     realName: '',
     remark: '',
     role: 'user',
+    roleIds: [],
     status: 1,
     username: '',
   });
@@ -121,13 +212,32 @@ function openEdit(row: SystemUserListItem) {
   isEdit.value = true;
   Object.assign(form, {
     id: row.id,
+    maxDevices: row.maxDevices ?? 0,
     password: '',
     realName: row.realName,
     remark: row.remark,
     role: row.role,
+    roleIds: [...(row.roleIds ?? [])],
     status: row.status,
     username: row.username,
   });
+  // 用户已有但不在当前可选列表中的角色(如超管分配的), 补充为不可选展示项, 避免下拉框显示原始ID
+  const known = new Set(rbacRoleOptions.value.map((r) => r.id));
+  const extraIds = form.roleIds.filter((id) => !known.has(id));
+  const extraNames = row.roleNames ?? [];
+  for (const id of extraIds) {
+    const idx = row.roleIds?.indexOf(id) ?? -1;
+    const name = extraNames[idx] || `角色#${id}`;
+    rbacRoleOptions.value.push({
+      code: '',
+      createdAt: '',
+      id,
+      name: `${name} (不可分配)`,
+      remark: '',
+      status: 1,
+    });
+    known.add(id);
+  }
   dialogVisible.value = true;
 }
 
@@ -137,9 +247,12 @@ async function handleSave() {
     if (isEdit.value) {
       await updateUserApi({
         id: form.id,
+        // 仅超管提交该字段; 其他角色由后端强制拦截
+        ...(isSuperAdmin.value ? { maxDevices: form.maxDevices } : {}),
         password: form.password || undefined,
         realName: form.realName,
         remark: form.remark,
+        roleIds: form.roleIds,
         status: form.status,
         username: form.username || undefined,
       });
@@ -154,10 +267,12 @@ async function handleSave() {
         return;
       }
       await createUserApi({
+        ...(isSuperAdmin.value ? { maxDevices: form.maxDevices } : {}),
         password: form.password,
         realName: form.realName,
         remark: form.remark,
         role: form.role,
+        roleIds: form.roleIds,
         username: form.username,
       });
       ElMessage.success('创建成功');
@@ -275,7 +390,9 @@ async function handleBatchPurge() {
   fetchRecycle();
 }
 
-onMounted(fetchList);
+onMounted(() => {
+  fetchRoles();
+});
 </script>
 
 <template>
@@ -302,11 +419,16 @@ onMounted(fetchList);
         />
       </ElSelect>
       <ElButton type="primary" @click="handleSearch">查询</ElButton>
-      <ElButton @click="() => { query.username = ''; query.role = ''; handleSearch(); }"
-        >重置</ElButton
-      >
+      <ElButton @click="handleReset">重置</ElButton>
       <div class="flex-1"></div>
+      <ElButton :loading="exporting" @click="handleExport('xlsx')">
+        导出 Excel
+      </ElButton>
+      <ElButton :loading="exporting" @click="handleExport('csv')">
+        导出 CSV
+      </ElButton>
       <ElButton @click="openRecycle">回收站</ElButton>
+      <ElButton @click="openImport">导入</ElButton>
       <ElButton type="primary" @click="openCreate">新增</ElButton>
     </div>
 
@@ -329,11 +451,34 @@ onMounted(fetchList);
           <ElTag :type="roleTagType(row.role)">{{ roleText(row.role) }}</ElTag>
         </template>
       </ElTableColumn>
+      <ElTableColumn label="功能角色" min-width="160">
+        <template #default="{ row }">
+          <template v-if="row.roleNames && row.roleNames.length > 0">
+            <ElTag
+              v-for="name in row.roleNames"
+              :key="name"
+              size="small"
+              class="mr-1"
+            >
+              {{ name }}
+            </ElTag>
+          </template>
+          <span v-else class="text-gray-400">—</span>
+        </template>
+      </ElTableColumn>
       <ElTableColumn label="状态" width="90">
         <template #default="{ row }">
-          <ElTag :type="row.status === 1 ? 'success' : 'danger'">
-            {{ row.status === 1 ? '启用' : '禁用' }}
-          </ElTag>
+          <DictTag
+            type="sys_user_status"
+            :value="row.status"
+            :fallback="userStatusFallback"
+          />
+        </template>
+      </ElTableColumn>
+      <ElTableColumn v-if="isSuperAdmin" label="最大设备数" width="110">
+        <template #default="{ row }">
+          <span v-if="row.maxDevices">{{ row.maxDevices }}</span>
+          <span v-else class="text-gray-400">全局默认</span>
         </template>
       </ElTableColumn>
       <ElTableColumn prop="createdAt" label="创建时间" width="170" />
@@ -457,6 +602,27 @@ onMounted(fetchList);
             />
           </ElSelect>
         </ElFormItem>
+        <ElFormItem label="功能角色">
+          <ElSelect
+            v-model="form.roleIds"
+            multiple
+            clearable
+            placeholder="可选, 决定用户可用的菜单"
+            class="w-full"
+          >
+            <ElOption
+              v-for="r in rbacRoleOptions"
+              :key="r.id"
+              :label="r.name"
+              :value="r.id"
+              :disabled="r.code === ''"
+            />
+          </ElSelect>
+          <div class="w-full text-xs text-gray-400">
+            功能角色决定"能用哪些菜单", 与上方数据权限角色相互独立; 灰色选项为超管分配,
+            不可在此移除
+          </div>
+        </ElFormItem>
         <ElFormItem label="昵称">
           <ElInput v-model="form.realName" maxlength="64" />
         </ElFormItem>
@@ -478,6 +644,18 @@ onMounted(fetchList);
             <ElOption :value="0" label="禁用" />
           </ElSelect>
         </ElFormItem>
+        <ElFormItem v-if="isSuperAdmin" label="最大设备数">
+          <ElInputNumber
+            v-model="form.maxDevices"
+            :min="0"
+            :max="999"
+            class="w-full"
+          />
+          <div class="w-full text-xs text-gray-400">
+            该账号允许同时在线的设备数, 0 表示使用全局默认值; 超出上限时
+            最早登录的设备会被顶下线
+          </div>
+        </ElFormItem>
         <ElFormItem label="备注">
           <ElInput v-model="form.remark" maxlength="255" />
         </ElFormItem>
@@ -486,6 +664,76 @@ onMounted(fetchList);
         <ElButton @click="dialogVisible = false">取消</ElButton>
         <ElButton type="primary" :loading="saving" @click="handleSave">
           保存
+        </ElButton>
+      </template>
+    </ElDialog>
+
+    <!-- Excel 导入 -->
+    <ElDialog
+      v-model="importVisible"
+      title="Excel 导入用户"
+      width="720px"
+      destroy-on-close
+    >
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <ElButton @click="handleDownloadTemplate">下载模板</ElButton>
+        <span class="text-xs text-gray-400">
+          模板含表头、说明行与示例行; 需填用户名、密码、角色(管理员/用户)、状态(启用/禁用),
+          {{ isSuperAdmin ? '可选填最大设备数' : '最大设备数仅超级管理员可设置' }}
+        </span>
+      </div>
+
+      <ElUpload
+        drag
+        :auto-upload="false"
+        :limit="1"
+        accept=".xlsx"
+        :on-change="handleImportFileChange"
+        :on-remove="handleImportFileRemove"
+      >
+        <div class="p-4 text-sm">
+          将 .xlsx 文件拖到此处, 或
+          <span class="text-primary">点击选择</span>
+        </div>
+      </ElUpload>
+
+      <div class="mt-3 flex flex-wrap items-center gap-2">
+        <ElSwitch v-model="importAtomic" />
+        <span class="text-sm">全量回滚(勾选后任一行失败则全部不写入)</span>
+        <span class="text-xs text-gray-400">默认部分成功</span>
+      </div>
+
+      <div v-if="importResult" class="mt-4">
+        <div class="mb-2 text-sm font-medium">
+          导入结果: 总 {{ importResult.total }} 条, 成功
+          {{ importResult.success }} 条, 失败 {{ importResult.failed }} 条
+          <ElTag
+            v-if="importResult.atomic"
+            size="small"
+            type="warning"
+            class="ml-1"
+          >
+            全量回滚
+          </ElTag>
+        </div>
+        <ElTable
+          v-if="importResult.errors && importResult.errors.length > 0"
+          :data="importResult.errors"
+          border
+          size="small"
+          max-height="260"
+        >
+          <ElTableColumn prop="row" label="行号" width="80" />
+          <ElTableColumn prop="username" label="用户名" width="140" />
+          <ElTableColumn prop="reason" label="失败原因" min-width="260" />
+        </ElTable>
+        <div v-else class="text-sm text-emerald-600">全部导入成功</div>
+      </div>
+
+      <template #footer>
+        <ElButton @click="importVisible = false">关闭</ElButton>
+        <ElButton type="primary" :loading="importLoading" @click="handleImport">
+          开始导入
         </ElButton>
       </template>
     </ElDialog>

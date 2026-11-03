@@ -38,6 +38,12 @@ import {
   updateMenuApi,
 } from '#/api/system/menu';
 import { getUserListApi } from '#/api/system/user';
+import {
+  getRoleGrantInfoApi,
+  getRoleListApi,
+  grantRoleApi,
+} from '#/api/system/role';
+import type { SystemRoleItem } from '#/api/system/role';
 import IconPicker from '#/components/icon-picker/index.vue';
 
 defineOptions({ name: 'SystemMenu' });
@@ -298,11 +304,16 @@ const grantTree = ref();
 const grantMenus = ref<SystemMenuItem[]>([]);
 const grantChecked = ref<number[]>([]);
 const grantUsername = ref('');
+// 授权对象: 用户 或 功能角色
+const grantTargetType = ref<'role' | 'user'>('user');
+const grantRoles = ref<SystemRoleItem[]>([]);
+const grantRoleId = ref<number>();
 
 async function openGrant() {
   grantVisible.value = true;
   grantUserId.value = undefined;
   grantUsername.value = '';
+  grantRoleId.value = undefined;
   grantMenus.value = [];
   grantChecked.value = [];
   grantLoading.value = true;
@@ -311,12 +322,43 @@ async function openGrant() {
     grantUsers.value = (res.items ?? []).filter((u) =>
       isSuperAdmin.value ? u.role !== 'super_admin' : u.role === 'user',
     );
+    // 功能角色列表(普通管理员仅能看到自己可分配的角色)
+    try {
+      const roleRes = await getRoleListApi();
+      grantRoles.value = (roleRes as { items: SystemRoleItem[] }).items ?? [];
+    } catch {
+      grantRoles.value = [];
+    }
   } finally {
     grantLoading.value = false;
   }
 }
 
-async function handleGrantUserChange() {
+// 切换授权对象类型时清空已选目标
+function handleGrantTargetTypeChange() {
+  grantUserId.value = undefined;
+  grantRoleId.value = undefined;
+  grantUsername.value = '';
+  grantMenus.value = [];
+  grantChecked.value = [];
+}
+
+async function handleGrantTargetChange() {
+  if (grantTargetType.value === 'role') {
+    if (!grantRoleId.value) return;
+    grantLoading.value = true;
+    try {
+      const res = await getRoleGrantInfoApi(grantRoleId.value);
+      grantUsername.value = res.name;
+      grantMenus.value = res.items ?? [];
+      grantChecked.value = res.checkedIds ?? [];
+      await nextTick();
+      grantTree.value?.setCheckedKeys(grantChecked.value, false);
+    } finally {
+      grantLoading.value = false;
+    }
+    return;
+  }
   if (!grantUserId.value) return;
   grantLoading.value = true;
   try {
@@ -332,13 +374,28 @@ async function handleGrantUserChange() {
 }
 
 async function handleGrantSave() {
+  const checked: number[] = grantTree.value?.getCheckedKeys() ?? [];
+  if (grantTargetType.value === 'role') {
+    if (!grantRoleId.value) {
+      ElMessage.warning('请选择要授权的角色');
+      return;
+    }
+    grantSaving.value = true;
+    try {
+      await grantRoleApi(grantRoleId.value, checked);
+      ElMessage.success(`已保存「${grantUsername.value}」的菜单授权`);
+      grantVisible.value = false;
+    } finally {
+      grantSaving.value = false;
+    }
+    return;
+  }
   if (!grantUserId.value) {
     ElMessage.warning('请选择要授权的用户');
     return;
   }
   grantSaving.value = true;
   try {
-    const checked: number[] = grantTree.value?.getCheckedKeys() ?? [];
     await grantMenuApi(grantUserId.value, checked);
     ElMessage.success(`已保存「${grantUsername.value}」的菜单授权`);
     grantVisible.value = false;
@@ -558,13 +615,22 @@ onMounted(fetchList);
       destroy-on-close
     >
       <div class="mb-3">
+        <ElRadioGroup
+          v-model="grantTargetType"
+          class="mb-2"
+          @change="handleGrantTargetTypeChange"
+        >
+          <ElRadio value="user">按用户授权</ElRadio>
+          <ElRadio value="role">按功能角色授权</ElRadio>
+        </ElRadioGroup>
         <ElSelect
+          v-if="grantTargetType === 'user'"
           v-model="grantUserId"
           v-loading="grantLoading"
           placeholder="选择要授权的账号"
           filterable
           class="w-full"
-          @change="handleGrantUserChange"
+          @change="handleGrantTargetChange"
         >
           <ElOption
             v-for="u in grantUsers"
@@ -573,11 +639,27 @@ onMounted(fetchList);
             :value="u.id"
           />
         </ElSelect>
+        <ElSelect
+          v-else
+          v-model="grantRoleId"
+          v-loading="grantLoading"
+          placeholder="选择要授权的功能角色"
+          filterable
+          class="w-full"
+          @change="handleGrantTargetChange"
+        >
+          <ElOption
+            v-for="r in grantRoles"
+            :key="r.id"
+            :label="`${r.name} (${r.code})`"
+            :value="r.id"
+          />
+        </ElSelect>
         <div class="mt-1 text-xs text-gray-400">
           {{
             isSuperAdmin
-              ? '超级管理员可将任意路由下发给管理员或用户'
-              : '管理员只能将超管下发给自己的路由分配给自己的下级用户'
+              ? '超级管理员可将任意路由下发给用户或功能角色'
+              : '管理员只能将超管下发给自己的路由转发给下级用户或可分配的角色, 保存时会保留超管直授、自己无权管理的菜单'
           }}
         </div>
       </div>
@@ -591,14 +673,16 @@ onMounted(fetchList);
           default-expand-all
           :props="{ label: 'title', children: 'children' }"
         />
-        <div v-else class="text-gray-400">请选择账号后加载可授权菜单</div>
+        <div v-else class="text-gray-400">
+          请选择授权对象后加载可授权菜单
+        </div>
       </div>
       <template #footer>
         <ElButton @click="grantVisible = false">取消</ElButton>
         <ElButton
           type="primary"
           :loading="grantSaving"
-          :disabled="!grantUserId"
+          :disabled="grantTargetType === 'role' ? !grantRoleId : !grantUserId"
           @click="handleGrantSave"
           >保存授权</ElButton
         >

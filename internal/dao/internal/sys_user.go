@@ -21,36 +21,40 @@ type SysUserDao struct {
 
 // SysUserColumns defines and stores column names for the table sys_user.
 type SysUserColumns struct {
-	Id        string // 用户ID
-	Pid       string // 父级管理员ID, 0表示顶级
-	Username  string // 登录用户名
-	Password  string // 密码(bcrypt)
-	RealName  string // 昵称
-	Avatar    string // 头像地址
-	Role      string // 角色: super_admin/admin/user
-	Status    string // 状态: 1=启用 0=禁用
-	Remark    string // 备注
-	CreatedAt string // 创建时间
-	UpdatedAt string // 更新时间
-	DeletedAt string // 删除时间(软删除)
-	DeletedBy string // 删除操作人ID
+	Id                 string // 用户ID
+	Pid                string // 父级管理员ID, 0表示顶级
+	Username           string // 登录用户名
+	Password           string // 密码(bcrypt)
+	RealName           string // 昵称
+	Avatar             string // 头像地址
+	Role               string // 角色: super_admin/admin/user
+	Status             string // 状态: 1=启用 0=禁用
+	Remark             string // 备注
+	MaxDevices         string // 最大同时在线设备数, 0表示使用全局默认
+	MustChangePassword string // 是否需强制修改密码: 1=是 0=否
+	CreatedAt          string // 创建时间
+	UpdatedAt          string // 更新时间
+	DeletedAt          string // 删除时间(软删除)
+	DeletedBy          string // 删除操作人ID
 }
 
 // sysUserColumns holds the columns for the table sys_user.
 var sysUserColumns = SysUserColumns{
-	Id:        "id",
-	Pid:       "pid",
-	Username:  "username",
-	Password:  "password",
-	RealName:  "real_name",
-	Avatar:    "avatar",
-	Role:      "role",
-	Status:    "status",
-	Remark:    "remark",
-	CreatedAt: "created_at",
-	UpdatedAt: "updated_at",
-	DeletedAt: "deleted_at",
-	DeletedBy: "deleted_by",
+	Id:                 "id",
+	Pid:                "pid",
+	Username:           "username",
+	Password:           "password",
+	RealName:           "real_name",
+	Avatar:             "avatar",
+	Role:               "role",
+	Status:             "status",
+	Remark:             "remark",
+	MaxDevices:         "max_devices",
+	MustChangePassword: "must_change_password",
+	CreatedAt:          "created_at",
+	UpdatedAt:          "updated_at",
+	DeletedAt:          "deleted_at",
+	DeletedBy:          "deleted_by",
 }
 
 // NewSysUserDao creates and returns a new DAO object for table data access.

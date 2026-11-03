@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS `sys_user` (
     `role`       varchar(32)  NOT NULL DEFAULT 'user' COMMENT '角色: super_admin/admin/user',
     `status`     tinyint(4)   NOT NULL DEFAULT 1 COMMENT '状态: 1=启用 0=禁用',
     `remark`     varchar(255) NOT NULL DEFAULT '' COMMENT '备注',
+    `max_devices` int(11) NULL DEFAULT NULL COMMENT '最大同时在线设备数, NULL表示使用全局默认',
+    `must_change_password` tinyint(4) NOT NULL DEFAULT 0 COMMENT '是否需强制修改密码: 1=是 0=否',
     `created_at` datetime DEFAULT NULL COMMENT '创建时间',
     `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
     `deleted_at` datetime DEFAULT NULL COMMENT '删除时间(软删除)',
@@ -63,6 +65,50 @@ CREATE TABLE IF NOT EXISTS `sys_user_menu` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '用户菜单授权表';
 
 -- ----------------------------
+-- 功能角色表(RBAC)
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `sys_role` (
+    `id`         bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '角色ID',
+    `code`       varchar(64)  NOT NULL COMMENT '角色编码(全局唯一, 如 ops)',
+    `name`       varchar(64)  NOT NULL COMMENT '角色名称(显示用)',
+    `remark`     varchar(255) NOT NULL DEFAULT '' COMMENT '备注',
+    `status`     tinyint(4)   NOT NULL DEFAULT 1 COMMENT '状态: 1=启用 0=停用',
+    `created_by` bigint(20) unsigned NOT NULL DEFAULT 0 COMMENT '创建人ID',
+    `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+    `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+    `deleted_at` datetime DEFAULT NULL COMMENT '删除时间(软删除)',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_code_deleted` (`code`, `deleted_at`),
+    KEY `idx_name` (`name`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '功能角色表';
+
+-- ----------------------------
+-- 用户-角色关联表
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `sys_user_role` (
+    `id`         bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `user_id`    bigint(20) unsigned NOT NULL COMMENT '用户ID',
+    `role_id`    bigint(20) unsigned NOT NULL COMMENT '角色ID',
+    `created_at` datetime DEFAULT NULL COMMENT '分配时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_user_role` (`user_id`, `role_id`),
+    KEY `idx_role` (`role_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '用户角色关联表';
+
+-- ----------------------------
+-- 角色-菜单授权表
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `sys_role_menu` (
+    `id`         bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `role_id`    bigint(20) unsigned NOT NULL COMMENT '角色ID',
+    `menu_id`    bigint(20) unsigned NOT NULL COMMENT '菜单ID',
+    `created_at` datetime DEFAULT NULL COMMENT '授权时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_role_menu` (`role_id`, `menu_id`),
+    KEY `idx_menu` (`menu_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '角色菜单授权表';
+
+-- ----------------------------
 -- 登录日志表
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `sys_login_log` (
@@ -104,3 +150,64 @@ CREATE TABLE IF NOT EXISTS `sys_operation_log` (
     KEY `idx_user_id` (`user_id`),
     KEY `idx_created_at` (`created_at`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '操作日志表';
+
+-- ----------------------------
+-- 数据字典类型表
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `sys_dict_type` (
+    `id`         bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '字典类型ID',
+    `type`       varchar(64)  NOT NULL COMMENT '字典类型编码(全局唯一)',
+    `name`       varchar(64)  NOT NULL COMMENT '字典类型名称',
+    `status`     tinyint(4)   NOT NULL DEFAULT 1 COMMENT '状态: 1=启用 0=停用',
+    `remark`     varchar(255) NOT NULL DEFAULT '' COMMENT '备注',
+    `created_by` bigint(20) unsigned NOT NULL DEFAULT 0 COMMENT '创建人ID',
+    `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+    `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+    `deleted_at` datetime DEFAULT NULL COMMENT '删除时间(软删除)',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_type_deleted` (`type`, `deleted_at`),
+    KEY `idx_name` (`name`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '数据字典类型表';
+
+-- ----------------------------
+-- 数据字典项表
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `sys_dict_data` (
+    `id`         bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '字典项ID',
+    `dict_type`  varchar(64)  NOT NULL COMMENT '所属字典类型编码',
+    `label`      varchar(64)  NOT NULL COMMENT '显示名称',
+    `value`      varchar(64)  NOT NULL COMMENT '字典值',
+    `sort`       int(11)      NOT NULL DEFAULT 0 COMMENT '排序(升序)',
+    `status`     tinyint(4)   NOT NULL DEFAULT 1 COMMENT '状态: 1=启用 0=停用',
+    `tag_color`  varchar(32)  NOT NULL DEFAULT '' COMMENT '前端标签颜色: success/warning/danger/info',
+    `remark`     varchar(255) NOT NULL DEFAULT '' COMMENT '备注',
+    `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+    `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
+    `deleted_at` datetime DEFAULT NULL COMMENT '删除时间(软删除)',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_dict_type_value_deleted` (`dict_type`, `value`, `deleted_at`),
+    KEY `idx_dict_type` (`dict_type`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '数据字典项表';
+
+-- ----------------------------
+-- 系统参数配置表
+-- 仅存放运行时可变的业务/展示参数(仪表盘趋势天数、列表条数、导入导出上限等);
+-- 登录失败阈值、锁定窗口、验证码阈值、密码复杂度、会话上限等安全参数禁止放入本表,
+-- 必须继续由 config.yaml 维护, 避免"可被管理员修改的值"反过来约束管理员自己的登录安全。
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `sys_config` (
+    `id`           bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '参数ID',
+    `config_key`   varchar(128) NOT NULL COMMENT '参数键(唯一)',
+    `config_value` text         NOT NULL COMMENT '参数值',
+    `name`         varchar(64)  NOT NULL DEFAULT '' COMMENT '参数名称',
+    `remark`       varchar(255) NOT NULL DEFAULT '' COMMENT '备注',
+    `status`       tinyint(4)   NOT NULL DEFAULT 1 COMMENT '状态: 1=启用 0=停用',
+    `builtin`      tinyint(4)   NOT NULL DEFAULT 0 COMMENT '是否内置: 1=内置(不可删除, key不可修改)',
+    `created_by`   bigint(20) unsigned NOT NULL DEFAULT 0 COMMENT '创建人ID',
+    `created_at`   datetime DEFAULT NULL COMMENT '创建时间',
+    `updated_at`   datetime DEFAULT NULL COMMENT '更新时间',
+    `deleted_at`   datetime DEFAULT NULL COMMENT '删除时间(软删除)',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_config_key_deleted` (`config_key`, `deleted_at`),
+    KEY `idx_name` (`name`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '系统参数配置表';

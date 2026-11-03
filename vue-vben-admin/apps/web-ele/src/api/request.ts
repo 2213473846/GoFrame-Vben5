@@ -80,6 +80,43 @@ function createRequestClient(baseURL: string, options?: RequestClientOptions) {
     }),
   );
 
+  // 会话被顶替/超出设备数上限/管理员强制下线: HTTP 401 + body code 4001
+  // 必须放在刷新拦截器之前: 直接提示业务文案并回到登录页, 不允许旧 refreshToken 再续命
+  client.addResponseInterceptor({
+    rejected: async (error) => {
+      const response = error?.response;
+      const body = response?.data ?? {};
+      if (response?.status === 401 && body?.code === 4001) {
+        const msg =
+          body?.message || body?.error || '登录状态已失效, 请重新登录';
+        ElMessage.error(msg);
+        // 标记为已重试, 让后续认证拦截器跳过 refresh 流程
+        if (error.config) {
+          error.config.__isRetryRequest = true;
+        }
+        await doReAuthenticate();
+      }
+      throw error;
+    },
+  });
+
+  // 强制改密: HTTP 403 + body code 4030(未改密前后端只放行改密与登出)
+  // 登录页在拿到登录响应后会自行弹窗引导改密, 这里兜底处理会话中途被要求改密的情况
+  client.addResponseInterceptor({
+    rejected: async (error) => {
+      const response = error?.response;
+      const body = response?.data ?? {};
+      if (response?.status === 403 && body?.code === 4030) {
+        ElMessage.error(body?.message || '请先修改初始密码后再使用系统');
+        if (error.config) {
+          error.config.__isRetryRequest = true;
+        }
+        await doReAuthenticate();
+      }
+      throw error;
+    },
+  });
+
   // token过期的处理
   client.addResponseInterceptor(
     authenticateResponseInterceptor({

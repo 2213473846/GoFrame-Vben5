@@ -1,4 +1,4 @@
-﻿package boot
+package boot
 
 import (
 	"context"
@@ -6,7 +6,9 @@ import (
 	"demo/internal/consts"
 	"demo/internal/dao"
 	"demo/internal/model/do"
+	dictsvc "demo/internal/service/dict"
 	menusvc "demo/internal/service/menu"
+	sysconfigsvc "demo/internal/service/sysconfig"
 
 	"github.com/gogf/gf/v2/errors/gerror"
 	"golang.org/x/crypto/bcrypt"
@@ -23,6 +25,28 @@ func Run(ctx context.Context) (err error) {
 	}
 	// 日志管理菜单独立幂等 seed(存量数据库也能增量生效)
 	if err = menusvc.New().SeedLogs(ctx); err != nil {
+		return err
+	}
+	// 角色管理菜单独立幂等 seed
+	if err = menusvc.New().SeedRoleMenu(ctx); err != nil {
+		return err
+	}
+	// 字典管理菜单与内置字典数据独立幂等 seed
+	if err = menusvc.New().SeedDict(ctx); err != nil {
+		return err
+	}
+	if err = dictsvc.New().Seed(ctx); err != nil {
+		return err
+	}
+	// 系统参数配置: 菜单与内置参数独立幂等 seed
+	if err = menusvc.New().SeedConfig(ctx); err != nil {
+		return err
+	}
+	if err = sysconfigsvc.New().Seed(ctx); err != nil {
+		return err
+	}
+	// 工作台菜单独立幂等 seed(只下发给管理员)
+	if err = menusvc.New().SeedDashboard(ctx); err != nil {
 		return err
 	}
 	// 系统监控菜单独立幂等 seed

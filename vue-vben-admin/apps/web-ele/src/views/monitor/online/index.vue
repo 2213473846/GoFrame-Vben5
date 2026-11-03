@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { OnlineUserItem } from '#/api/system/online';
 
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed } from 'vue';
 
 import { useUserStore } from '@vben/stores';
 
@@ -20,6 +20,7 @@ import {
   getOnlineUserListApi,
   kickOnlineUserApi,
 } from '#/api/system/online';
+import { useTable } from '#/composables/useTable';
 
 defineOptions({ name: 'OnlineUser' });
 
@@ -27,50 +28,27 @@ const userStore = useUserStore();
 // 当前登录用户, 强退自己没有意义, 前端先行禁用
 const currentUserId = computed(() => Number(userStore.userInfo?.userId ?? 0));
 
-const loading = ref(false);
-const items = ref<OnlineUserItem[]>([]);
-const total = ref(0);
-const query = reactive({
-  page: 1,
-  pageSize: 10,
-  username: '',
-});
-
-async function fetchList() {
-  loading.value = true;
-  try {
-    const res = await getOnlineUserListApi({
-      page: query.page,
-      pageSize: query.pageSize,
-      username: query.username || undefined,
+// 列表状态(分页/加载/查询条件由 useTable 统一管理)
+const {
+  fetchList,
+  handlePageChange,
+  handlePageSizeChange,
+  handleReset,
+  handleSearch,
+  items,
+  loading,
+  query,
+  total,
+} = useTable<OnlineUserItem, { username: string }>({
+  async fetch(q) {
+    return getOnlineUserListApi({
+      page: q.page,
+      pageSize: q.pageSize,
+      username: q.username || undefined,
     });
-    items.value = res.items;
-    total.value = res.total;
-  } finally {
-    loading.value = false;
-  }
-}
-
-function handleSearch() {
-  query.page = 1;
-  fetchList();
-}
-
-function handleReset() {
-  query.username = '';
-  handleSearch();
-}
-
-function handlePageSizeChange(size: number) {
-  query.pageSize = size;
-  query.page = 1;
-  fetchList();
-}
-
-function handlePageChange(page: number) {
-  query.page = page;
-  fetchList();
-}
+  },
+  defaultQuery: { username: '' },
+});
 
 const roleText = (role: string) => {
   if (role === 'super_admin') return '超级管理员';
@@ -99,8 +77,6 @@ async function handleKick(row: OnlineUserItem) {
   ElMessage.success(`已强退用户「${name}」`);
   fetchList();
 }
-
-onMounted(fetchList);
 </script>
 
 <template>
@@ -150,12 +126,35 @@ onMounted(fetchList);
         <ElTableColumn prop="browser" label="浏览器" min-width="110" />
         <ElTableColumn prop="os" label="操作系统" min-width="110" />
         <ElTableColumn prop="loginTime" label="登录时间" min-width="160" />
+        <ElTableColumn label="状态" width="90">
+          <template #default="{ row }">
+            <ElTag
+              :type="row.status === 1 ? 'success' : 'info'"
+              size="small"
+            >
+              {{ row.status === 1 ? '在线' : '已下线' }}
+            </ElTag>
+          </template>
+        </ElTableColumn>
+        <ElTableColumn label="下线原因" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.status === 0" class="text-gray-500">
+              {{ row.offlineReason || '会话已失效' }}
+              <span v-if="row.offlineAt" class="text-gray-400">
+                ({{ row.offlineAt }})
+              </span>
+            </span>
+            <span v-else class="text-gray-400">—</span>
+          </template>
+        </ElTableColumn>
         <ElTableColumn label="操作" width="100" fixed="right">
           <template #default="{ row }">
             <ElButton
               link
               type="danger"
-              :disabled="Number(row.userId) === currentUserId"
+              :disabled="
+                Number(row.userId) === currentUserId || row.status === 0
+              "
               @click="handleKick(row as OnlineUserItem)"
             >
               强退

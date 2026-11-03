@@ -15,17 +15,21 @@ type ListReq struct {
 
 // ListItem 列表项
 type ListItem struct {
-	Id             uint64 `json:"id"`
-	Pid            uint64 `json:"pid"`
-	Username       string `json:"username"`
-	RealName       string `json:"realName"`
-	Avatar         string `json:"avatar"`
-	Role           string `json:"role"`
-	Status         int    `json:"status"`
-	Remark         string `json:"remark"`
-	CreatedAt      string `json:"createdAt"`
-	ParentUsername string `json:"parentUsername"` // 上级用户名, 顶级为空
-	ParentRealName string `json:"parentRealName"` // 上级昵称
+	Id             uint64   `json:"id"`
+	Pid            uint64   `json:"pid"`
+	Username       string   `json:"username"`
+	RealName       string   `json:"realName"`
+	Avatar         string   `json:"avatar"`
+	Role           string   `json:"role"`
+	Status         int      `json:"status"`
+	Remark         string   `json:"remark"`
+	CreatedAt      string   `json:"createdAt"`
+	ParentUsername string   `json:"parentUsername"` // 上级用户名, 顶级为空
+	ParentRealName string   `json:"parentRealName"` // 上级昵称
+	RoleIds        []uint64 `json:"roleIds"`        // 功能角色ID(RBAC)
+	RoleNames      []string `json:"roleNames"`      // 功能角色名称
+	// MaxDevices 最大同时在线设备数; 仅超管可见, 其他角色为 null
+	MaxDevices *int `json:"maxDevices"`
 }
 
 // ListRes 分页结果

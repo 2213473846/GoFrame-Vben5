@@ -23,15 +23,19 @@ func (c *ControllerV1) OnlineUserList(ctx context.Context, req *v1.OnlineUserLis
 	}
 	for _, item := range out.Items {
 		res.Items = append(res.Items, &v1.OnlineUserItem{
-			UserId:    item.UserId,
-			Username:  item.Username,
-			RealName:  item.RealName,
-			Role:      item.Role,
-			Ip:        item.Ip,
-			Location:  item.Location,
-			Browser:   item.Browser,
-			Os:        item.Os,
-			LoginTime: item.LoginTime,
+			UserId:        item.UserId,
+			SessionId:     item.SessionId,
+			Username:      item.Username,
+			RealName:      item.RealName,
+			Role:          item.Role,
+			Ip:            item.Ip,
+			Location:      item.Location,
+			Browser:       item.Browser,
+			Os:            item.Os,
+			LoginTime:     item.LoginTime,
+			Status:        item.Status,
+			OfflineReason: item.OfflineReason,
+			OfflineAt:     item.OfflineAt,
 		})
 	}
 	return

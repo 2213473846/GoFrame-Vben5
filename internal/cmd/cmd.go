@@ -10,9 +10,13 @@ import (
 	"github.com/gogf/gf/v2/os/gcmd"
 
 	"demo/internal/controller/auth"
+	"demo/internal/controller/dashboard"
+	"demo/internal/controller/dict"
 	"demo/internal/controller/log"
 	"demo/internal/controller/menu"
 	"demo/internal/controller/online"
+	"demo/internal/controller/role"
+	"demo/internal/controller/sysconfig"
 	"demo/internal/controller/user"
 	"demo/internal/service/boot"
 	"demo/internal/service/middleware"
@@ -43,8 +47,12 @@ var (
 					auth.NewV1(),
 					user.NewV1(),
 					menu.NewV1(),
+					role.NewV1(),
 					log.NewV1(),
 					online.NewV1(),
+					dict.NewV1(),
+					sysconfig.NewV1(),
+					dashboard.NewV1(),
 				)
 			})
 			s.Run()

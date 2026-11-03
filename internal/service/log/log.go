@@ -4,8 +4,11 @@ package log
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"sync"
@@ -15,12 +18,16 @@ import (
 	"demo/internal/dao"
 	"demo/internal/model/do"
 	"demo/internal/model/entity"
+	dictsvc "demo/internal/service/dict"
+	exportsvc "demo/internal/service/export"
 	"demo/internal/service/identity"
 
+	"github.com/gogf/gf/v2/database/gdb"
 	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 	"github.com/gogf/gf/v2/os/gctx"
+	"github.com/gogf/gf/v2/os/gtime"
 	"github.com/gogf/gf/v2/util/gconv"
 )
 
@@ -276,12 +283,33 @@ type LoginListOutput struct {
 
 // LoginList 登录日志分页列表
 func (s *Service) LoginList(ctx context.Context, in *LoginListInput) (*LoginListOutput, error) {
-	all, ids, err := visibleUserIds(ctx)
+	m, empty, err := s.loginQuery(ctx, in)
+	cols := dao.SysLoginLog.Columns()
 	if err != nil {
 		return nil, err
 	}
-	if !all && len(ids) == 0 {
+	if empty {
 		return &LoginListOutput{Items: []*entity.SysLoginLog{}}, nil
+	}
+	total, err := m.Count()
+	if err != nil {
+		return nil, gerror.Wrap(err, "查询登录日志失败")
+	}
+	var items []*entity.SysLoginLog
+	if err = m.Page(in.Page, in.PageSize).OrderDesc(cols.Id).Scan(&items); err != nil {
+		return nil, gerror.Wrap(err, "查询登录日志失败")
+	}
+	return &LoginListOutput{Items: items, Total: total}, nil
+}
+
+// loginQuery 构建登录日志查询(数据范围 + 筛选), 供列表与导出复用
+func (s *Service) loginQuery(ctx context.Context, in *LoginListInput) (*gdb.Model, bool, error) {
+	all, ids, err := visibleUserIds(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if !all && len(ids) == 0 {
+		return nil, true, nil
 	}
 	cols := dao.SysLoginLog.Columns()
 	m := dao.SysLoginLog.Ctx(ctx)
@@ -294,15 +322,7 @@ func (s *Service) LoginList(ctx context.Context, in *LoginListInput) (*LoginList
 	if in.Status >= 0 {
 		m = m.Where(cols.Status, in.Status)
 	}
-	total, err := m.Count()
-	if err != nil {
-		return nil, gerror.Wrap(err, "查询登录日志失败")
-	}
-	var items []*entity.SysLoginLog
-	if err = m.Page(in.Page, in.PageSize).OrderDesc(cols.Id).Scan(&items); err != nil {
-		return nil, gerror.Wrap(err, "查询登录日志失败")
-	}
-	return &LoginListOutput{Items: items, Total: total}, nil
+	return m, false, nil
 }
 
 // OperationListInput 操作日志查询入参
@@ -321,12 +341,33 @@ type OperationListOutput struct {
 
 // OperationList 操作日志分页列表
 func (s *Service) OperationList(ctx context.Context, in *OperationListInput) (*OperationListOutput, error) {
-	all, ids, err := visibleUserIds(ctx)
+	m, empty, err := s.operationQuery(ctx, in)
+	cols := dao.SysOperationLog.Columns()
 	if err != nil {
 		return nil, err
 	}
-	if !all && len(ids) == 0 {
+	if empty {
 		return &OperationListOutput{Items: []*entity.SysOperationLog{}}, nil
+	}
+	total, err := m.Count()
+	if err != nil {
+		return nil, gerror.Wrap(err, "查询操作日志失败")
+	}
+	var items []*entity.SysOperationLog
+	if err = m.Page(in.Page, in.PageSize).OrderDesc(cols.Id).Scan(&items); err != nil {
+		return nil, gerror.Wrap(err, "查询操作日志失败")
+	}
+	return &OperationListOutput{Items: items, Total: total}, nil
+}
+
+// operationQuery 构建操作日志查询(数据范围 + 筛选), 供列表与导出复用
+func (s *Service) operationQuery(ctx context.Context, in *OperationListInput) (*gdb.Model, bool, error) {
+	all, ids, err := visibleUserIds(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if !all && len(ids) == 0 {
+		return nil, true, nil
 	}
 	cols := dao.SysOperationLog.Columns()
 	m := dao.SysOperationLog.Ctx(ctx)
@@ -339,15 +380,115 @@ func (s *Service) OperationList(ctx context.Context, in *OperationListInput) (*O
 	if in.Status >= 0 {
 		m = m.Where(cols.Status, in.Status)
 	}
-	total, err := m.Count()
+	return m, false, nil
+}
+
+// LoginExport 导出登录日志, 复用 loginQuery 的筛选与数据范围
+func (s *Service) LoginExport(ctx context.Context, in *LoginListInput, format string, w io.Writer) (count int, err error) {
+	format, err = exportsvc.NormalizeFormat(format)
 	if err != nil {
-		return nil, gerror.Wrap(err, "查询操作日志失败")
+		return 0, gerror.NewCode(consts.CodeBadRequest, err.Error())
 	}
-	var items []*entity.SysOperationLog
-	if err = m.Page(in.Page, in.PageSize).OrderDesc(cols.Id).Scan(&items); err != nil {
-		return nil, gerror.Wrap(err, "查询操作日志失败")
+	m, empty, err := s.loginQuery(ctx, in)
+	if err != nil {
+		return 0, err
 	}
-	return &OperationListOutput{Items: items, Total: total}, nil
+	cols := dao.SysLoginLog.Columns()
+	statusLabels := statusLabelMap(ctx)
+	headers := []string{"ID", "用户名", "状态", "信息", "IP", "归属地", "浏览器", "操作系统", "登录时间"}
+	next := func(offset, limit int) ([][]string, error) {
+		if empty {
+			return nil, nil
+		}
+		var items []*entity.SysLoginLog
+		if scanErr := m.Limit(offset, limit).OrderDesc(cols.Id).Scan(&items); scanErr != nil {
+			if errors.Is(scanErr, sql.ErrNoRows) {
+				return nil, nil
+			}
+			return nil, gerror.Wrap(scanErr, "查询导出数据失败")
+		}
+		rows := make([][]string, 0, len(items))
+		for _, item := range items {
+			rows = append(rows, []string{
+				gconv.String(item.Id),
+				item.Username,
+				statusLabels[item.Status],
+				item.Message,
+				item.Ip,
+				item.Location,
+				item.Browser,
+				item.Os,
+				formatExportTime(item.CreatedAt),
+			})
+		}
+		return rows, nil
+	}
+	return exportsvc.Write(w, format, exportsvc.Options{Sheet: "登录日志", Headers: headers}, exportsvc.BatchSize(ctx), next)
+}
+
+// OperationExport 导出操作日志, 复用 operationQuery 的筛选与数据范围
+func (s *Service) OperationExport(ctx context.Context, in *OperationListInput, format string, w io.Writer) (count int, err error) {
+	format, err = exportsvc.NormalizeFormat(format)
+	if err != nil {
+		return 0, gerror.NewCode(consts.CodeBadRequest, err.Error())
+	}
+	m, empty, err := s.operationQuery(ctx, in)
+	if err != nil {
+		return 0, err
+	}
+	cols := dao.SysOperationLog.Columns()
+	statusLabels := statusLabelMap(ctx)
+	headers := []string{"ID", "用户名", "模块", "操作", "方法", "路径", "状态", "信息", "IP", "归属地", "浏览器", "操作系统", "操作时间"}
+	next := func(offset, limit int) ([][]string, error) {
+		if empty {
+			return nil, nil
+		}
+		var items []*entity.SysOperationLog
+		if scanErr := m.Limit(offset, limit).OrderDesc(cols.Id).Scan(&items); scanErr != nil {
+			if errors.Is(scanErr, sql.ErrNoRows) {
+				return nil, nil
+			}
+			return nil, gerror.Wrap(scanErr, "查询导出数据失败")
+		}
+		rows := make([][]string, 0, len(items))
+		for _, item := range items {
+			rows = append(rows, []string{
+				gconv.String(item.Id),
+				item.Username,
+				item.Module,
+				item.Action,
+				item.Method,
+				item.Path,
+				statusLabels[item.Status],
+				item.Message,
+				item.Ip,
+				item.Location,
+				item.Browser,
+				item.Os,
+				formatExportTime(item.CreatedAt),
+			})
+		}
+		return rows, nil
+	}
+	return exportsvc.Write(w, format, exportsvc.Options{Sheet: "操作日志", Headers: headers}, exportsvc.BatchSize(ctx), next)
+}
+
+// statusLabelMap 日志状态文案: 优先字典, 取不到回退内置默认值
+func statusLabelMap(ctx context.Context) map[int]string {
+	labels := map[int]string{1: "成功", 0: "失败"}
+	if options, err := dictsvc.New().Options(ctx, []string{dictsvc.TypeLogType}); err == nil {
+		for _, item := range options[dictsvc.TypeLogType] {
+			labels[gconv.Int(item.Value)] = item.Label
+		}
+	}
+	return labels
+}
+
+func formatExportTime(t *gtime.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.Format("Y-m-d H:i:s")
 }
 
 // visibleUserIds 当前用户可见的日志数据范围

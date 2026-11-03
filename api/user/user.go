@@ -19,4 +19,7 @@ type IUserV1 interface {
 	Recycle(ctx context.Context, req *v1.RecycleReq) (res *v1.RecycleRes, err error)
 	Restore(ctx context.Context, req *v1.RestoreReq) (res *v1.RestoreRes, err error)
 	Update(ctx context.Context, req *v1.UpdateReq) (res *v1.UpdateRes, err error)
+	Export(ctx context.Context, req *v1.ExportReq) (res *v1.ExportRes, err error)
+	ImportTemplate(ctx context.Context, req *v1.ImportTemplateReq) (res *v1.ImportTemplateRes, err error)
+	Import(ctx context.Context, req *v1.ImportReq) (res *v1.ImportRes, err error)
 }

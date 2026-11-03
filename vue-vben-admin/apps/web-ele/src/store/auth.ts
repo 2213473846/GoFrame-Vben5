@@ -31,14 +31,23 @@ export const useAuthStore = defineStore('auth', () => {
   ) {
     // 异步处理用户登录操作并获取 accessToken
     let userInfo: null | UserInfo = null;
+    let mustChangePassword = false;
     try {
       loginLoading.value = true;
-      const { accessToken } = await loginApi(params);
+      const result = await loginApi(params);
+      const { accessToken } = result;
+      mustChangePassword = Boolean(result?.mustChangePassword);
 
       // 如果成功获取到 accessToken
       if (accessToken) {
         // 将 accessToken 存储到 accessStore 中
         accessStore.setAccessToken(accessToken);
+
+        // 首次登录/弱密码: 先不拉取用户信息与权限码(会被强制改密中间件拦截),
+        // 由登录页弹窗引导修改密码, 改密成功后重新登录
+        if (mustChangePassword) {
+          return { mustChangePassword: true, userInfo: null };
+        }
 
         // 获取用户信息并存储到 accessStore 中
         const [fetchUserInfoResult, accessCodes] = await Promise.all([
@@ -74,6 +83,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     return {
+      mustChangePassword,
       userInfo,
     };
   }

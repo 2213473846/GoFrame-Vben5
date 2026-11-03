@@ -8,12 +8,13 @@ import (
 
 // Identity 当前登录用户身份
 type Identity struct {
-	Id       uint64 `json:"id"`
-	Pid      uint64 `json:"pid"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
-	RealName string `json:"realName"`
-	Avatar   string `json:"avatar"`
+	Id        uint64 `json:"id"`
+	Pid       uint64 `json:"pid"`
+	Username  string `json:"username"`
+	Role      string `json:"role"`
+	RealName  string `json:"realName"`
+	Avatar    string `json:"avatar"`
+	SessionId string `json:"sessionId,omitempty"` // 登录会话ID(一台设备/浏览器一次登录)
 }
 
 // Roles 返回角色数组(对齐前端 UserInfo.roles)

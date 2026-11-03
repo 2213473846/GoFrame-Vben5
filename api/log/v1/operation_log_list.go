@@ -7,7 +7,7 @@ type OperationLogListReq struct {
 	g.Meta   `path:"/operationlog/list" method:"get" tags:"OperationLog" summary:"操作日志列表"`
 	Page     int    `p:"page" d:"1"`
 	PageSize int    `p:"pageSize" d:"10"`
-	Username string `p:"username"` // 用户名模糊查询
+	Username string `p:"username"`      // 用户名模糊查询
 	Status   int    `p:"status" d:"-1"` // -1=全部 1=成功 0=失败
 }
 

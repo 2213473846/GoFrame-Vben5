@@ -1,8 +1,8 @@
+import type { PageParams, PageResult } from '#/api/types';
+
 import { requestClient } from '#/api/request';
 
-export interface LogListParams {
-  page?: number;
-  pageSize?: number;
+export interface LogListParams extends PageParams {
   status?: number; // -1=全部 1=成功 0=失败
   username?: string;
 }
@@ -35,10 +35,7 @@ export interface OperationLogItem {
   username: string;
 }
 
-export interface LogListResult<T> {
-  items: T[];
-  total: number;
-}
+export type LogListResult<T> = PageResult<T>;
 
 /**
  * 登录日志列表(数据范围: 超管全部, 管理员自己+新增用户, 用户仅自己)

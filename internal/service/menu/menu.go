@@ -10,6 +10,7 @@ import (
 	"demo/internal/dao"
 	"demo/internal/model/do"
 	"demo/internal/model/entity"
+	"demo/internal/service/authz"
 	"demo/internal/service/identity"
 
 	"github.com/gogf/gf/v2/database/gdb"
@@ -89,9 +90,9 @@ type UpdateInput struct {
 // All 获取当前登录用户可见的路由树(后端下发)
 // 超管: 全部启用菜单; 其他角色: 已授权菜单 + 公共菜单, 并自动补齐祖先节点
 func (s *Service) All(ctx context.Context) (routes []*RouteNode, err error) {
-	actor := identity.Get(ctx)
-	if actor == nil {
-		return nil, gerror.NewCode(consts.CodeUnauthorized, "未登录或登录已过期")
+	actor, err := authz.Login(ctx)
+	if err != nil {
+		return nil, err
 	}
 	cols := dao.SysMenu.Columns()
 	var menus []*entity.SysMenu
@@ -176,9 +177,9 @@ func joinRoutePath(parentPath, path string) string {
 // List 菜单管理列表(树形)
 // 超级管理员: 全部菜单; 管理员: 仅查看自己可下发的菜单(只读, 不可增删改)
 func (s *Service) List(ctx context.Context) (nodes []*MenuNode, err error) {
-	actor := identity.Get(ctx)
-	if actor == nil {
-		return nil, gerror.NewCode(consts.CodeUnauthorized, "未登录或登录已过期")
+	actor, err := authz.Login(ctx)
+	if err != nil {
+		return nil, err
 	}
 	if !actor.IsSuperAdmin() {
 		if actor.Role != consts.RoleAdmin {
@@ -200,12 +201,9 @@ func (s *Service) List(ctx context.Context) (nodes []*MenuNode, err error) {
 
 // Create 新增菜单, 仅超级管理员
 func (s *Service) Create(ctx context.Context, in CreateInput) (id uint64, err error) {
-	actor := identity.Get(ctx)
-	if actor == nil {
-		return 0, gerror.NewCode(consts.CodeUnauthorized, "未登录或登录已过期")
-	}
-	if !actor.IsSuperAdmin() {
-		return 0, gerror.NewCode(consts.CodeForbidden, "仅超级管理员可新增路由")
+	actor, err := authz.SuperAdmin(ctx, "仅超级管理员可新增路由")
+	if err != nil {
+		return 0, err
 	}
 	if err = s.validateInput(ctx, in, 0); err != nil {
 		return 0, err
@@ -283,6 +281,10 @@ func (s *Service) Delete(ctx context.Context, id uint64) (err error) {
 		if _, err := dao.SysUserMenu.Ctx(ctx).Where(dao.SysUserMenu.Columns().MenuId, target.Id).Delete(); err != nil {
 			return err
 		}
+		// 同步清理角色对该菜单的授权, 避免孤儿数据
+		if _, err := dao.SysRoleMenu.Ctx(ctx).Where(dao.SysRoleMenu.Columns().MenuId, target.Id).Delete(); err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		return gerror.Wrap(err, "删除菜单失败")
@@ -294,9 +296,9 @@ func (s *Service) Delete(ctx context.Context, id uint64) (err error) {
 // 超管: 目标为管理员/普通用户, 可授权全部启用菜单
 // 管理员: 目标仅限自己的下级普通用户, 仅能下发超管下发给自己的菜单
 func (s *Service) GrantInfo(ctx context.Context, userId uint64) (target *entity.SysUser, nodes []*MenuNode, checked []uint64, err error) {
-	actor := identity.Get(ctx)
-	if actor == nil {
-		return nil, nil, nil, gerror.NewCode(consts.CodeUnauthorized, "未登录或登录已过期")
+	actor, err := authz.Login(ctx)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	target, err = s.getUser(ctx, userId)
 	if err != nil {
@@ -318,9 +320,9 @@ func (s *Service) GrantInfo(ctx context.Context, userId uint64) (target *entity.
 
 // Grant 保存用户菜单授权(全量覆盖), 并自动补齐祖先菜单
 func (s *Service) Grant(ctx context.Context, userId uint64, menuIds []uint64) (err error) {
-	actor := identity.Get(ctx)
-	if actor == nil {
-		return gerror.NewCode(consts.CodeUnauthorized, "未登录或登录已过期")
+	actor, err := authz.Login(ctx)
+	if err != nil {
+		return err
 	}
 	target, err := s.getUser(ctx, userId)
 	if err != nil {
@@ -406,14 +408,8 @@ func (s *Service) Grant(ctx context.Context, userId uint64, menuIds []uint64) (e
 
 // requireSuperAdmin 校验超管身份
 func (s *Service) requireSuperAdmin(ctx context.Context) error {
-	actor := identity.Get(ctx)
-	if actor == nil {
-		return gerror.NewCode(consts.CodeUnauthorized, "未登录或登录已过期")
-	}
-	if !actor.IsSuperAdmin() {
-		return gerror.NewCode(consts.CodeForbidden, "仅超级管理员可管理路由")
-	}
-	return nil
+	_, err := authz.SuperAdmin(ctx, "仅超级管理员可管理路由")
+	return err
 }
 
 // validateInput 校验菜单输入
@@ -557,8 +553,29 @@ func (s *Service) grantableMenus(ctx context.Context, actor *identity.Identity) 
 	return result, nil
 }
 
-// grantedMenuIds 查询用户已授权的菜单ID
+// grantedMenuIds 查询用户的有效菜单ID = 直授权(sys_user_menu) ∪ 所有启用角色的菜单(sys_role_menu)
+// 角色需处于启用状态; 用户无任何角色时与历史行为一致(仅直授权)
 func (s *Service) grantedMenuIds(ctx context.Context, userId uint64) (ids []uint64, err error) {
+	direct, err := s.directMenuIds(ctx, userId)
+	if err != nil {
+		return nil, err
+	}
+	roleIds, err := s.userRoleIds(ctx, userId)
+	if err != nil {
+		return nil, err
+	}
+	if len(roleIds) == 0 {
+		return direct, nil
+	}
+	fromRole, err := s.roleMenuIds(ctx, roleIds)
+	if err != nil {
+		return nil, err
+	}
+	return mergeMenuIds(direct, fromRole), nil
+}
+
+// directMenuIds 查询用户直授权的菜单ID(sys_user_menu)
+func (s *Service) directMenuIds(ctx context.Context, userId uint64) (ids []uint64, err error) {
 	var records []*entity.SysUserMenu
 	cols := dao.SysUserMenu.Columns()
 	if err = dao.SysUserMenu.Ctx(ctx).Where(cols.UserId, userId).Fields(cols.MenuId).Scan(&records); err != nil {
@@ -573,6 +590,87 @@ func (s *Service) grantedMenuIds(ctx context.Context, userId uint64) (ids []uint
 		ids = append(ids, r.MenuId)
 	}
 	return ids, nil
+}
+
+// userRoleIds 查询用户的启用角色ID列表
+func (s *Service) userRoleIds(ctx context.Context, userId uint64) (roleIds []uint64, err error) {
+	var records []*entity.SysUserRole
+	userRoleCols := dao.SysUserRole.Columns()
+	roleCols := dao.SysRole.Columns()
+	// 仅统计启用且未删除的角色(停用角色的菜单不再生效)
+	if err = dao.SysUserRole.Ctx(ctx).
+		As("ur").
+		LeftJoin(dao.SysRole.Table()+" r", "r."+roleCols.Id+" = ur."+userRoleCols.RoleId).
+		Where("ur."+userRoleCols.UserId, userId).
+		Where("r."+roleCols.Status, 1).
+		Fields("ur." + userRoleCols.RoleId).
+		Scan(&records); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, gerror.Wrap(err, "查询用户角色失败")
+	}
+	roleIds = make([]uint64, 0, len(records))
+	for _, r := range records {
+		roleIds = append(roleIds, r.RoleId)
+	}
+	return roleIds, nil
+}
+
+// roleMenuIds 查询一组角色的已授权菜单ID(去重)
+func (s *Service) roleMenuIds(ctx context.Context, roleIds []uint64) (ids []uint64, err error) {
+	if len(roleIds) == 0 {
+		return nil, nil
+	}
+	var records []*entity.SysRoleMenu
+	cols := dao.SysRoleMenu.Columns()
+	if err = dao.SysRoleMenu.Ctx(ctx).WhereIn(cols.RoleId, roleIds).Fields(cols.MenuId).Scan(&records); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, gerror.Wrap(err, "查询角色菜单授权失败")
+	}
+	ids = make([]uint64, 0, len(records))
+	for _, r := range records {
+		ids = append(ids, r.MenuId)
+	}
+	return ids, nil
+}
+
+// mergeMenuIds 合并两组菜单ID并去重(保序: 先 direct 后 fromRole)
+func mergeMenuIds(direct []uint64, fromRole []uint64) []uint64 {
+	seen := make(map[uint64]struct{}, len(direct)+len(fromRole))
+	merged := make([]uint64, 0, len(direct)+len(fromRole))
+	for _, id := range direct {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		merged = append(merged, id)
+	}
+	for _, id := range fromRole {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		merged = append(merged, id)
+	}
+	return merged
+}
+
+// GrantableMenus 当前操作人可授权的菜单(启用状态), 供角色授权复用
+// 超管: 全部启用菜单; 管理员: 超管已下发给自己的菜单(含角色带来的)
+func (s *Service) GrantableMenus(ctx context.Context) ([]*entity.SysMenu, error) {
+	actor, err := authz.Login(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.grantableMenus(ctx, actor)
+}
+
+// GrantedMenuIds 查询用户的有效菜单ID(直授权 ∪ 角色菜单), 供其他服务复用
+func (s *Service) GrantedMenuIds(ctx context.Context, userId uint64) ([]uint64, error) {
+	return s.grantedMenuIds(ctx, userId)
 }
 
 // withAncestors 从全量菜单中补齐 picked 节点的所有祖先
@@ -642,6 +740,11 @@ func (s *Service) buildRoutes(menus []*entity.SysMenu, pid uint64) []*RouteNode 
 		return nodes
 	}
 	return walk(pid)
+}
+
+// BuildMenuTree 构建管理端菜单树(导出供角色服务复用)
+func (s *Service) BuildMenuTree(menus []*entity.SysMenu, pid uint64) []*MenuNode {
+	return s.buildMenuTree(menus, pid)
 }
 
 // buildMenuTree 构建管理端菜单树
@@ -871,6 +974,65 @@ func (s *Service) SeedLogs(ctx context.Context) (err error) {
 	return nil
 }
 
+// SeedRoleMenu 初始化角色管理菜单(幂等, 服务启动时调用)
+// 二级菜单: 系统管理/角色管理; 默认下发给所有存量管理员
+func (s *Service) SeedRoleMenu(ctx context.Context) (err error) {
+	cols := dao.SysMenu.Columns()
+	// 幂等: 已存在则跳过
+	count, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "SystemRole").Count()
+	if err != nil {
+		return gerror.Wrap(err, "初始化角色管理菜单失败")
+	}
+	if count > 0 {
+		return nil
+	}
+	sysId, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "System").Value(cols.Id)
+	if err != nil {
+		return gerror.Wrap(err, "初始化角色管理菜单失败")
+	}
+	if sysId.IsNil() || sysId.Int64() == 0 {
+		// 系统管理目录不存在(可能被删除), 跳过本次初始化
+		return nil
+	}
+	if _, err = dao.SysMenu.Ctx(ctx).Data(do.SysMenu{
+		Pid:       gconv.Uint64(sysId),
+		Name:      "SystemRole",
+		Path:      "role",
+		Component: "/system/role/index",
+		Type:      TypeMenu,
+		Title:     "角色管理",
+		Icon:      "lucide:shield-check",
+		Sort:      3,
+		Status:    1,
+		Remark:    "系统内置",
+	}).Insert(); err != nil {
+		return gerror.Wrap(err, "初始化角色管理菜单失败")
+	}
+	roleMenuId, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "SystemRole").Value(cols.Id)
+	if err != nil {
+		return gerror.Wrap(err, "初始化角色管理菜单失败")
+	}
+	// 给所有存量管理员下发角色管理菜单(InsertIgnore 防止重复授权)
+	var admins []*entity.SysUser
+	if err = dao.SysUser.Ctx(ctx).Where(dao.SysUser.Columns().Role, consts.RoleAdmin).Scan(&admins); err != nil {
+		return gerror.Wrap(err, "初始化角色管理菜单授权失败")
+	}
+	if len(admins) == 0 {
+		return nil
+	}
+	records := make([]do.SysUserMenu, 0, len(admins)*2)
+	for _, a := range admins {
+		records = append(records,
+			do.SysUserMenu{UserId: a.Id, MenuId: gconv.Uint64(sysId)},
+			do.SysUserMenu{UserId: a.Id, MenuId: gconv.Uint64(roleMenuId)},
+		)
+	}
+	if _, err = dao.SysUserMenu.Ctx(ctx).Data(records).InsertIgnore(); err != nil {
+		return gerror.Wrap(err, "初始化角色管理菜单授权失败")
+	}
+	return nil
+}
+
 // SeedMonitor 初始化系统监控菜单(幂等, 服务启动时调用)
 // 顶级目录: 系统监控; 二级: 在线用户; 默认下发给所有存量管理员
 func (s *Service) SeedMonitor(ctx context.Context) (err error) {
@@ -937,6 +1099,171 @@ func (s *Service) SeedMonitor(ctx context.Context) (err error) {
 	}
 	if _, err = dao.SysUserMenu.Ctx(ctx).Data(records).InsertIgnore(); err != nil {
 		return gerror.Wrap(err, "初始化系统监控菜单授权失败")
+	}
+	return nil
+}
+
+// SeedDict 初始化数据字典管理菜单(幂等, 服务启动时调用)
+// 二级菜单: 系统管理/字典管理; 默认下发给所有存量管理员(只读, 写操作仍由服务层限制为超管)
+func (s *Service) SeedDict(ctx context.Context) (err error) {
+	cols := dao.SysMenu.Columns()
+	// 幂等: 已存在则跳过
+	count, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "SystemDict").Count()
+	if err != nil {
+		return gerror.Wrap(err, "初始化字典管理菜单失败")
+	}
+	if count > 0 {
+		return nil
+	}
+	sysId, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "System").Value(cols.Id)
+	if err != nil {
+		return gerror.Wrap(err, "初始化字典管理菜单失败")
+	}
+	if sysId.IsNil() || sysId.Int64() == 0 {
+		// 系统管理目录不存在(可能被删除), 跳过本次初始化
+		return nil
+	}
+	if _, err = dao.SysMenu.Ctx(ctx).Data(do.SysMenu{
+		Pid:       gconv.Uint64(sysId),
+		Name:      "SystemDict",
+		Path:      "dict",
+		Component: "/system/dict/index",
+		Type:      TypeMenu,
+		Title:     "字典管理",
+		Icon:      "lucide:book-open",
+		Sort:      4,
+		Status:    1,
+		Remark:    "系统内置",
+	}).Insert(); err != nil {
+		return gerror.Wrap(err, "初始化字典管理菜单失败")
+	}
+	dictMenuId, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "SystemDict").Value(cols.Id)
+	if err != nil {
+		return gerror.Wrap(err, "初始化字典管理菜单失败")
+	}
+	// 给所有存量管理员下发字典管理菜单(InsertIgnore 防止重复授权)
+	var admins []*entity.SysUser
+	if err = dao.SysUser.Ctx(ctx).Where(dao.SysUser.Columns().Role, consts.RoleAdmin).Scan(&admins); err != nil {
+		return gerror.Wrap(err, "初始化字典管理菜单授权失败")
+	}
+	if len(admins) == 0 {
+		return nil
+	}
+	records := make([]do.SysUserMenu, 0, len(admins)*2)
+	for _, a := range admins {
+		records = append(records,
+			do.SysUserMenu{UserId: a.Id, MenuId: gconv.Uint64(sysId)},
+			do.SysUserMenu{UserId: a.Id, MenuId: gconv.Uint64(dictMenuId)},
+		)
+	}
+	if _, err = dao.SysUserMenu.Ctx(ctx).Data(records).InsertIgnore(); err != nil {
+		return gerror.Wrap(err, "初始化字典管理菜单授权失败")
+	}
+	return nil
+}
+
+// SeedConfig 初始化系统参数配置菜单(幂等, 服务启动时调用)
+// 二级菜单: 系统管理/参数配置; 默认下发给所有存量管理员(只读, 写操作仅超管)
+func (s *Service) SeedConfig(ctx context.Context) (err error) {
+	cols := dao.SysMenu.Columns()
+	count, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "SystemConfig").Count()
+	if err != nil {
+		return gerror.Wrap(err, "初始化参数配置菜单失败")
+	}
+	if count > 0 {
+		return nil
+	}
+	sysId, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "System").Value(cols.Id)
+	if err != nil {
+		return gerror.Wrap(err, "初始化参数配置菜单失败")
+	}
+	if sysId.IsNil() || sysId.Int64() == 0 {
+		// 系统管理目录不存在(可能被删除), 跳过本次初始化
+		return nil
+	}
+	if _, err = dao.SysMenu.Ctx(ctx).Data(do.SysMenu{
+		Pid:       gconv.Uint64(sysId),
+		Name:      "SystemConfig",
+		Path:      "config",
+		Component: "/system/config/index",
+		Type:      TypeMenu,
+		Title:     "参数配置",
+		Icon:      "lucide:settings-2",
+		Sort:      5,
+		Status:    1,
+		Remark:    "系统内置",
+	}).Insert(); err != nil {
+		return gerror.Wrap(err, "初始化参数配置菜单失败")
+	}
+	configMenuId, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "SystemConfig").Value(cols.Id)
+	if err != nil {
+		return gerror.Wrap(err, "初始化参数配置菜单失败")
+	}
+	var admins []*entity.SysUser
+	if err = dao.SysUser.Ctx(ctx).Where(dao.SysUser.Columns().Role, consts.RoleAdmin).Scan(&admins); err != nil {
+		return gerror.Wrap(err, "初始化参数配置菜单授权失败")
+	}
+	if len(admins) == 0 {
+		return nil
+	}
+	records := make([]do.SysUserMenu, 0, len(admins)*2)
+	for _, a := range admins {
+		records = append(records,
+			do.SysUserMenu{UserId: a.Id, MenuId: gconv.Uint64(sysId)},
+			do.SysUserMenu{UserId: a.Id, MenuId: gconv.Uint64(configMenuId)},
+		)
+	}
+	if _, err = dao.SysUserMenu.Ctx(ctx).Data(records).InsertIgnore(); err != nil {
+		return gerror.Wrap(err, "初始化参数配置菜单授权失败")
+	}
+	return nil
+}
+
+// SeedDashboard 初始化工作台菜单(幂等, 服务启动时调用)
+// 顶级菜单, 默认只下发给超管与存量管理员; 普通用户不展示管理统计卡片
+func (s *Service) SeedDashboard(ctx context.Context) (err error) {
+	cols := dao.SysMenu.Columns()
+	count, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "Dashboard").Count()
+	if err != nil {
+		return gerror.Wrap(err, "初始化工作台菜单失败")
+	}
+	if count == 0 {
+		if _, err = dao.SysMenu.Ctx(ctx).Data(do.SysMenu{
+			Pid:       0,
+			Name:      "Dashboard",
+			Path:      "/dashboard",
+			Component: "/dashboard/index",
+			Type:      TypeMenu,
+			Title:     "工作台",
+			Icon:      "lucide:layout-dashboard",
+			Sort:      1,
+			Status:    1,
+			Remark:    "系统内置",
+		}).Insert(); err != nil {
+			return gerror.Wrap(err, "初始化工作台菜单失败")
+		}
+	}
+	dashboardId, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "Dashboard").Value(cols.Id)
+	if err != nil {
+		return gerror.Wrap(err, "初始化工作台菜单失败")
+	}
+	if dashboardId.IsNil() || dashboardId.Int64() == 0 {
+		return nil
+	}
+	// 每次启动都对存量管理员补授权(InsertIgnore 幂等), 覆盖"菜单已存在但新管理员没有授权"的情况
+	var admins []*entity.SysUser
+	if err = dao.SysUser.Ctx(ctx).Where(dao.SysUser.Columns().Role, consts.RoleAdmin).Scan(&admins); err != nil {
+		return gerror.Wrap(err, "初始化工作台菜单授权失败")
+	}
+	if len(admins) == 0 {
+		return nil
+	}
+	records := make([]do.SysUserMenu, 0, len(admins))
+	for _, a := range admins {
+		records = append(records, do.SysUserMenu{UserId: a.Id, MenuId: gconv.Uint64(dashboardId)})
+	}
+	if _, err = dao.SysUserMenu.Ctx(ctx).Data(records).InsertIgnore(); err != nil {
+		return gerror.Wrap(err, "初始化工作台菜单授权失败")
 	}
 	return nil
 }

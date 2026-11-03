@@ -1,10 +1,14 @@
 package middleware
 
 import (
+	"context"
+
 	"demo/internal/consts"
+	"demo/internal/dao"
 	"demo/internal/service/identity"
 	logsvc "demo/internal/service/log"
 	onlinesvc "demo/internal/service/online"
+	secsvc "demo/internal/service/security"
 	"demo/internal/service/token"
 
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -35,6 +39,10 @@ func (s *Service) Response(r *ghttp.Request) {
 	r.Middleware.Next()
 	// 操作日志埋点: 记录管理接口的写操作(登录接口单独记录在登录日志)
 	recordOperationLog(r)
+	// 文件下载(导出)由 handler 直接写入原始响应流, 不再包装 JSON
+	if r.Response.Header().Get("Content-Disposition") != "" {
+		return
+	}
 	if r.Response.BufferLength() > 0 {
 		return
 	}
@@ -47,6 +55,17 @@ func (s *Service) Response(r *ghttp.Request) {
 			httpStatus, bodyCode = 401, 401
 		case int(consts.CodeForbidden.Code()):
 			httpStatus, bodyCode = 403, -1
+		case int(consts.CodeSessionKicked.Code()):
+			// 会话被顶替/超出设备数上限: HTTP 401 触发前端重新登录, body code 供前端提示具体原因
+			httpStatus, bodyCode = 401, 4001
+		case int(consts.CodeCaptchaRequired.Code()):
+			httpStatus, bodyCode = 400, 4028
+		case int(consts.CodeCaptchaInvalid.Code()):
+			httpStatus, bodyCode = 400, 4027
+		case int(consts.CodeLoginLocked.Code()):
+			httpStatus, bodyCode = 429, 4029
+		case int(consts.CodePasswordChangeRequired.Code()):
+			httpStatus, bodyCode = 403, 4030
 		}
 		// 直接设置状态码(WriteStatus 会把状态文本写入响应体, 导致 JSON 前缀污染)
 		r.Response.Status = httpStatus
@@ -76,9 +95,13 @@ func (s *Service) Auth(r *ghttp.Request) {
 	id, err := s.tokenSvc.Verify(r.Context(), GetBearerToken(r))
 	if err != nil {
 		msg := err.Error()
+		bodyCode := 401
+		if gerror.Code(err).Code() == consts.CodeSessionKicked.Code() {
+			bodyCode = 4001
+		}
 		r.Response.Status = 401
 		r.Response.WriteJson(g.Map{
-			"code":    401,
+			"code":    bodyCode,
 			"data":    nil,
 			"error":   msg,
 			"message": msg,
@@ -86,9 +109,39 @@ func (s *Service) Auth(r *ghttp.Request) {
 		return
 	}
 	r.SetCtx(identity.With(r.Context(), *id))
+	// 强制改密拦截: 未改密前只放行"修改密码"和"登出", 其余接口返回 4030
+	if mustChangePassword(r.Context(), id.Id) && !passwordChangeAllowed[r.URL.Path] {
+		r.Response.Status = 403
+		r.Response.WriteJson(g.Map{
+			"code":    4030,
+			"data":    nil,
+			"error":   nil,
+			"message": secsvc.New().ChangeRequiredMessage(r.Context()),
+		})
+		return
+	}
 	// 在线会话续期: 活跃会话保持在线, 停止活动后随 TTL 过期
-	onlinesvc.Touch(r.Context(), GetBearerToken(r))
+	onlinesvc.Touch(r.Context(), id.SessionId)
 	r.Middleware.Next()
+}
+
+// passwordChangeAllowed 强制改密期间仍可访问的接口
+var passwordChangeAllowed = map[string]bool{
+	"/auth/change-password": true,
+	"/auth/logout":          true,
+}
+
+// mustChangePassword 查询用户是否需要强制改密(查询失败时放行, 避免数据库抖动导致全站不可用)
+func mustChangePassword(ctx context.Context, userId uint64) bool {
+	v, err := dao.SysUser.Ctx(ctx).
+		Where(dao.SysUser.Columns().Id, userId).
+		Fields(dao.SysUser.Columns().MustChangePassword).
+		Value()
+	if err != nil {
+		g.Log().Warningf(ctx, "查询强制改密标记失败 userId=%d: %v", userId, err)
+		return false
+	}
+	return !v.IsNil() && v.Int() == 1
 }
 
 // GetBearerToken 从请求头解析 accessToken
@@ -102,16 +155,30 @@ func GetBearerToken(r *ghttp.Request) string {
 
 // operationLogRoutes 操作日志埋点路由映射: 路径 => (模块, 操作类型)
 var operationLogRoutes = map[string][2]string{
-	"/user/create":  {"用户管理", "新增用户"},
-	"/user/update":  {"用户管理", "修改用户"},
-	"/user/delete":  {"用户管理", "删除用户"},
-	"/user/purge":   {"用户管理", "彻底删除用户"},
-	"/user/restore": {"用户管理", "恢复用户"},
-	"/menu/create":  {"路由管理", "新增路由"},
-	"/menu/update":  {"路由管理", "修改路由"},
-	"/menu/delete":  {"路由管理", "删除路由"},
-	"/menu/grant":   {"路由管理", "菜单授权"},
-	"/online/kick":  {"在线用户", "强退用户"},
+	"/user/create":      {"用户管理", "新增用户"},
+	"/user/update":      {"用户管理", "修改用户"},
+	"/user/delete":      {"用户管理", "删除用户"},
+	"/user/purge":       {"用户管理", "彻底删除用户"},
+	"/user/restore":     {"用户管理", "恢复用户"},
+	"/menu/create":      {"路由管理", "新增路由"},
+	"/menu/update":      {"路由管理", "修改路由"},
+	"/menu/delete":      {"路由管理", "删除路由"},
+	"/menu/grant":       {"路由管理", "菜单授权"},
+	"/role/create":      {"角色管理", "新增角色"},
+	"/role/update":      {"角色管理", "修改角色"},
+	"/role/delete":      {"角色管理", "删除角色"},
+	"/role/grant":       {"角色管理", "角色菜单授权"},
+	"/online/kick":      {"在线用户", "强退用户"},
+	"/dict/type/create": {"数据字典", "新增字典类型"},
+	"/dict/type/update": {"数据字典", "修改字典类型"},
+	"/dict/type/delete": {"数据字典", "删除字典类型"},
+	"/dict/type/status": {"数据字典", "修改字典类型状态"},
+	"/dict/data/create": {"数据字典", "新增字典项"},
+	"/dict/data/update": {"数据字典", "修改字典项"},
+	"/dict/data/delete": {"数据字典", "删除字典项"},
+	"/dict/data/status": {"数据字典", "修改字典项状态"},
+	"/config/update":    {"系统配置", "修改系统参数"},
+	"/config/reset":     {"系统配置", "重置系统参数"},
 }
 
 // recordOperationLog 记录管理写操作日志(登录/登出等认证接口除外)
