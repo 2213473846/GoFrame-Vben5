@@ -116,3 +116,13 @@ dashboard:
   # 最近动态条数(1-50)
   recentLimit: 8
 
+# 服务监控
+monitor:
+  # 前端服务监控页面自动刷新间隔(秒), 随 GET /monitor/server 响应下发给前端, 避免前端写死
+  refreshSeconds: 30
+
+# 通知公告
+notice:
+  # 用户端未读数轮询间隔(秒), 随 GET /notice/unread-count 响应下发给前端
+  pollSeconds: 60
+

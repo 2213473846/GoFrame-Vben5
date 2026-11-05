@@ -7,6 +7,7 @@ import (
 	"demo/internal/dao"
 	"demo/internal/model/do"
 	dictsvc "demo/internal/service/dict"
+	jobsvc "demo/internal/service/job"
 	menusvc "demo/internal/service/menu"
 	sysconfigsvc "demo/internal/service/sysconfig"
 
@@ -50,7 +51,28 @@ func Run(ctx context.Context) (err error) {
 		return err
 	}
 	// 系统监控菜单独立幂等 seed
-	return menusvc.New().SeedMonitor(ctx)
+	if err = menusvc.New().SeedMonitor(ctx); err != nil {
+		return err
+	}
+	// 系统监控子菜单: 服务监控 / 定时任务(幂等 + 对存量管理员授权)
+	if err = menusvc.New().SeedMonitorServer(ctx); err != nil {
+		return err
+	}
+	if err = menusvc.New().SeedMonitorJob(ctx); err != nil {
+		return err
+	}
+	// 通知公告菜单(系统管理下)与顶级「我的通知」菜单独立幂等 seed
+	if err = menusvc.New().SeedNotice(ctx); err != nil {
+		return err
+	}
+	if err = menusvc.New().SeedMyNotice(ctx); err != nil {
+		return err
+	}
+	// 内置定时任务(clearlog)幂等插入(默认停用)并加载启用任务到调度器
+	if err = jobsvc.New().Seed(ctx); err != nil {
+		return err
+	}
+	return jobsvc.New().Start(ctx)
 }
 
 // seedMenus 初始化内置菜单; 首次初始化时给存量非超管用户下发默认菜单

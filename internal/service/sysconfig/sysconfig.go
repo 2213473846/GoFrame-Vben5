@@ -34,6 +34,7 @@ const (
 	KeyExportMaxRows        = "export.maxRows"        // 单次导出最大行数
 	KeyImportMaxRows        = "import.maxRows"        // 单次导入最大数据行数
 	KeyImportMaxFileBytes   = "import.maxFileBytes"   // 导入文件大小上限(字节)
+	KeyLogRetainDays        = "log.retainDays"        // 日志保留天数(定时清理任务使用)
 )
 
 // maxBatchKeys 单次批量读取的参数个数上限
@@ -71,6 +72,10 @@ var builtinDefaults = []DefaultItem{
 	{
 		Key: KeyImportMaxFileBytes, Value: "5242880", Name: "导入文件大小上限",
 		Remark: "Excel 导入文件最大字节数, 默认 5MB", Min: 1024, Max: 52428800, Numeric: true,
+	},
+	{
+		Key: KeyLogRetainDays, Value: "90", Name: "日志保留天数",
+		Remark: "定时清理任务保留登录/操作日志的天数, 更早的记录会被删除, 范围 7-3650", Min: 7, Max: 3650, Numeric: true,
 	},
 }
 

@@ -12,8 +12,11 @@ import (
 	"demo/internal/controller/auth"
 	"demo/internal/controller/dashboard"
 	"demo/internal/controller/dict"
+	"demo/internal/controller/job"
 	"demo/internal/controller/log"
 	"demo/internal/controller/menu"
+	"demo/internal/controller/monitor"
+	"demo/internal/controller/notice"
 	"demo/internal/controller/online"
 	"demo/internal/controller/role"
 	"demo/internal/controller/sysconfig"
@@ -53,6 +56,9 @@ var (
 					dict.NewV1(),
 					sysconfig.NewV1(),
 					dashboard.NewV1(),
+					monitor.NewV1(),
+					job.NewV1(),
+					notice.NewV1(),
 				)
 			})
 			s.Run()

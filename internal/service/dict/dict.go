@@ -25,8 +25,10 @@ import (
 
 // 内置字典类型编码
 const (
-	TypeUserStatus = "sys_user_status" // 用户状态
-	TypeLogType    = "sys_log_type"    // 日志类型(成功/失败)
+	TypeUserStatus  = "sys_user_status" // 用户状态
+	TypeLogType     = "sys_log_type"    // 日志类型(成功/失败)
+	TypeNoticeType  = "notice_type"     // 公告类型(通知/公告)
+	TypeNoticeLevel = "notice_level"    // 公告级别(普通/重要/紧急)
 )
 
 // 字典项最大批量查询数量, 防止单次请求过大
@@ -606,6 +608,8 @@ func (s *Service) Seed(ctx context.Context) (err error) {
 	types := []do.SysDictType{
 		{Type: TypeUserStatus, Name: "用户状态", Status: 1, Remark: "系统内置"},
 		{Type: TypeLogType, Name: "日志类型", Status: 1, Remark: "系统内置"},
+		{Type: TypeNoticeType, Name: "公告类型", Status: 1, Remark: "系统内置"},
+		{Type: TypeNoticeLevel, Name: "公告级别", Status: 1, Remark: "系统内置"},
 	}
 	for _, t := range types {
 		count, err := dao.SysDictType.Ctx(ctx).Where(typeCols.Type, t.Type).Count()
@@ -625,6 +629,11 @@ func (s *Service) Seed(ctx context.Context) (err error) {
 		{DictType: TypeUserStatus, Label: "禁用", Value: "0", Sort: 2, Status: 1, TagColor: "danger", Remark: "系统内置"},
 		{DictType: TypeLogType, Label: "成功", Value: "1", Sort: 1, Status: 1, TagColor: "success", Remark: "系统内置"},
 		{DictType: TypeLogType, Label: "失败", Value: "0", Sort: 2, Status: 1, TagColor: "danger", Remark: "系统内置"},
+		{DictType: TypeNoticeType, Label: "通知", Value: "notice", Sort: 1, Status: 1, TagColor: "info", Remark: "系统内置"},
+		{DictType: TypeNoticeType, Label: "公告", Value: "announcement", Sort: 2, Status: 1, TagColor: "success", Remark: "系统内置"},
+		{DictType: TypeNoticeLevel, Label: "普通", Value: "normal", Sort: 1, Status: 1, TagColor: "info", Remark: "系统内置"},
+		{DictType: TypeNoticeLevel, Label: "重要", Value: "important", Sort: 2, Status: 1, TagColor: "warning", Remark: "系统内置"},
+		{DictType: TypeNoticeLevel, Label: "紧急", Value: "urgent", Sort: 3, Status: 1, TagColor: "danger", Remark: "系统内置"},
 	}
 	for _, item := range items {
 		count, err := dao.SysDictData.Ctx(ctx).

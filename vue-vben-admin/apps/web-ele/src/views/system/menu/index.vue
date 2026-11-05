@@ -670,6 +670,7 @@ onMounted(fetchList);
           :data="grantMenus"
           node-key="id"
           show-checkbox
+          check-strictly
           default-expand-all
           :props="{ label: 'title', children: 'children' }"
         />

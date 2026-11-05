@@ -16,6 +16,7 @@ import (
 	"demo/internal/service/authz"
 	"demo/internal/service/identity"
 	logsvc "demo/internal/service/log"
+	noticesvc "demo/internal/service/notice"
 	onlinesvc "demo/internal/service/online"
 	sysconfigsvc "demo/internal/service/sysconfig"
 	usersvc "demo/internal/service/user"
@@ -50,16 +51,27 @@ type RecentItem struct {
 	CreatedAt string `json:"createdAt"`
 }
 
+// NoticeBrief 工作台最近公告
+type NoticeBrief struct {
+	Id        uint64 `json:"id"`
+	Title     string `json:"title"`
+	Level     string `json:"level"`
+	PublishAt string `json:"publishAt"`
+	IsRead    bool   `json:"isRead"`
+}
+
 // Overview 工作台概览
 type Overview struct {
-	Scope             string       `json:"scope"` // all=超管全量, descendants=管理员可见范围
-	UserTotal         int          `json:"userTotal"`
-	OnlineCount       int          `json:"onlineCount"`
-	LoginSuccessToday int          `json:"loginSuccessToday"`
-	LoginFailedToday  int          `json:"loginFailedToday"`
-	TrendDays         int          `json:"trendDays"`
-	Trend             []TrendPoint `json:"trend"`
-	Recent            []RecentItem `json:"recent"`
+	Scope             string        `json:"scope"` // all=超管全量, descendants=管理员可见范围
+	UserTotal         int           `json:"userTotal"`
+	OnlineCount       int           `json:"onlineCount"`
+	LoginSuccessToday int           `json:"loginSuccessToday"`
+	LoginFailedToday  int           `json:"loginFailedToday"`
+	TrendDays         int           `json:"trendDays"`
+	Trend             []TrendPoint  `json:"trend"`
+	Recent            []RecentItem  `json:"recent"`
+	UnreadNoticeCount int           `json:"unreadNoticeCount"`
+	RecentNotices     []NoticeBrief `json:"recentNotices"`
 }
 
 // Service 工作台服务
@@ -136,6 +148,15 @@ func (s *Service) Overview(ctx context.Context) (out *Overview, err error) {
 	if err != nil {
 		return nil, err
 	}
+	// 通知公告: 未读数与最近 3 条, 内部复用 notice.visibleQuery 保证可见范围一致
+	unreadNoticeCount, err := noticesvc.New().UnreadCount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	recentNotices, err := noticesvc.New().RecentNotices(ctx, 3)
+	if err != nil {
+		return nil, err
+	}
 
 	scope := "descendants"
 	if actor.IsSuperAdmin() {
@@ -150,7 +171,22 @@ func (s *Service) Overview(ctx context.Context) (out *Overview, err error) {
 		TrendDays:         days,
 		Trend:             trend,
 		Recent:            recent,
+		UnreadNoticeCount: unreadNoticeCount,
+		RecentNotices:     toNoticeBriefs(recentNotices),
 	}, nil
+}
+
+// toNoticeBriefs 转换最近公告为工作台展示结构
+func toNoticeBriefs(items []*noticesvc.MyItem) []NoticeBrief {
+	briefs := make([]NoticeBrief, 0, len(items))
+	for _, item := range items {
+		brief := NoticeBrief{Id: item.Id, Title: item.Title, Level: item.NoticeLevel, IsRead: item.IsRead}
+		if item.PublishAt != nil {
+			brief.PublishAt = item.PublishAt.Format("Y-m-d H:i:s")
+		}
+		briefs = append(briefs, brief)
+	}
+	return briefs
 }
 
 // todayLoginCounts 今日登录成功/失败数(一次分组聚合)

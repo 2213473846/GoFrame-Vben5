@@ -25,14 +25,25 @@ type RecentItem struct {
 	CreatedAt string `json:"createdAt"`
 }
 
+// NoticeBrief 工作台最近公告
+type NoticeBrief struct {
+	Id        uint64 `json:"id"`
+	Title     string `json:"title"`
+	Level     string `json:"level"`
+	PublishAt string `json:"publishAt"`
+	IsRead    bool   `json:"isRead"`
+}
+
 // OverviewRes 工作台概览数据
 type OverviewRes struct {
-	Scope             string       `json:"scope"`
-	UserTotal         int          `json:"userTotal"`
-	OnlineCount       int          `json:"onlineCount"`
-	LoginSuccessToday int          `json:"loginSuccessToday"`
-	LoginFailedToday  int          `json:"loginFailedToday"`
-	TrendDays         int          `json:"trendDays"`
-	Trend             []TrendPoint `json:"trend"`
-	Recent            []RecentItem `json:"recent"`
+	Scope             string        `json:"scope"`
+	UserTotal         int           `json:"userTotal"`
+	OnlineCount       int           `json:"onlineCount"`
+	LoginSuccessToday int           `json:"loginSuccessToday"`
+	LoginFailedToday  int           `json:"loginFailedToday"`
+	TrendDays         int           `json:"trendDays"`
+	Trend             []TrendPoint  `json:"trend"`
+	Recent            []RecentItem  `json:"recent"`
+	UnreadNoticeCount int           `json:"unreadNoticeCount"`
+	RecentNotices     []NoticeBrief `json:"recentNotices"`
 }

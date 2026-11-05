@@ -193,6 +193,67 @@ var ddl = []string{
 		"`deleted_at` datetime DEFAULT NULL," +
 		"PRIMARY KEY (`id`), UNIQUE KEY `uk_config_key_deleted` (`config_key`, `deleted_at`), KEY `idx_name` (`name`)" +
 		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+	"CREATE TABLE IF NOT EXISTS `sys_job` (" +
+		"`id` bigint(20) unsigned NOT NULL AUTO_INCREMENT," +
+		"`name` varchar(64) NOT NULL," +
+		"`job_group` varchar(64) NOT NULL DEFAULT 'default'," +
+		"`invoke_target` varchar(128) NOT NULL," +
+		"`cron_expression` varchar(64) NOT NULL," +
+		"`status` tinyint(4) NOT NULL DEFAULT 1," +
+		"`concurrency_policy` tinyint(4) NOT NULL DEFAULT 0," +
+		"`timeout_seconds` int(11) NOT NULL DEFAULT 60," +
+		"`remark` varchar(255) NOT NULL DEFAULT ''," +
+		"`last_run_at` datetime DEFAULT NULL," +
+		"`last_result` varchar(128) NOT NULL DEFAULT ''," +
+		"`next_run_at` datetime DEFAULT NULL," +
+		"`created_at` datetime DEFAULT NULL," +
+		"`updated_at` datetime DEFAULT NULL," +
+		"`deleted_at` datetime DEFAULT NULL," +
+		"PRIMARY KEY (`id`), KEY `idx_name` (`name`), KEY `idx_status` (`status`)" +
+		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+	"CREATE TABLE IF NOT EXISTS `sys_job_log` (" +
+		"`id` bigint(20) unsigned NOT NULL AUTO_INCREMENT," +
+		"`job_id` bigint(20) unsigned NOT NULL DEFAULT 0," +
+		"`job_name` varchar(64) NOT NULL DEFAULT ''," +
+		"`trigger_type` tinyint(4) NOT NULL DEFAULT 1," +
+		"`started_at` datetime DEFAULT NULL," +
+		"`finished_at` datetime DEFAULT NULL," +
+		"`duration_ms` bigint(20) NOT NULL DEFAULT 0," +
+		"`status` tinyint(4) NOT NULL DEFAULT 1," +
+		"`message` text NULL," +
+		"`created_at` datetime DEFAULT NULL," +
+		"PRIMARY KEY (`id`), KEY `idx_job_id` (`job_id`), KEY `idx_started_at` (`started_at`)" +
+		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+	"CREATE TABLE IF NOT EXISTS `sys_notice` (" +
+		"`id` bigint(20) unsigned NOT NULL AUTO_INCREMENT," +
+		"`title` varchar(128) NOT NULL," +
+		"`content` text NOT NULL," +
+		"`notice_type` varchar(32) NOT NULL DEFAULT ''," +
+		"`notice_level` varchar(32) NOT NULL DEFAULT ''," +
+		"`status` tinyint(4) NOT NULL DEFAULT 0," +
+		"`target_scope` tinyint(4) NOT NULL DEFAULT 1," +
+		"`publisher_id` bigint(20) unsigned NOT NULL DEFAULT 0," +
+		"`publish_at` datetime DEFAULT NULL," +
+		"`expire_at` datetime DEFAULT NULL," +
+		"`created_at` datetime DEFAULT NULL," +
+		"`updated_at` datetime DEFAULT NULL," +
+		"`deleted_at` datetime DEFAULT NULL," +
+		"PRIMARY KEY (`id`), KEY `idx_status` (`status`, `deleted_at`), KEY `idx_publish_at` (`publish_at`), KEY `idx_publisher` (`publisher_id`)" +
+		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+	"CREATE TABLE IF NOT EXISTS `sys_notice_user` (" +
+		"`id` bigint(20) unsigned NOT NULL AUTO_INCREMENT," +
+		"`notice_id` bigint(20) unsigned NOT NULL," +
+		"`user_id` bigint(20) unsigned NOT NULL," +
+		"`created_at` datetime DEFAULT NULL," +
+		"PRIMARY KEY (`id`), UNIQUE KEY `uk_notice_user` (`notice_id`, `user_id`)" +
+		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+	"CREATE TABLE IF NOT EXISTS `sys_notice_read` (" +
+		"`id` bigint(20) unsigned NOT NULL AUTO_INCREMENT," +
+		"`notice_id` bigint(20) unsigned NOT NULL," +
+		"`user_id` bigint(20) unsigned NOT NULL," +
+		"`read_at` datetime DEFAULT NULL," +
+		"PRIMARY KEY (`id`), UNIQUE KEY `uk_notice_user` (`notice_id`, `user_id`)" +
+		") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
 }
 
 // Prepare 准备集成测试数据库: 重建当前包专属测试库并建表, 注册为默认数据库组。

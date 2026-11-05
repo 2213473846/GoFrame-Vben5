@@ -179,6 +179,16 @@ var operationLogRoutes = map[string][2]string{
 	"/dict/data/status": {"数据字典", "修改字典项状态"},
 	"/config/update":    {"系统配置", "修改系统参数"},
 	"/config/reset":     {"系统配置", "重置系统参数"},
+	"/job/create":       {"定时任务", "新增任务"},
+	"/job/update":       {"定时任务", "修改任务"},
+	"/job/delete":       {"定时任务", "删除任务"},
+	"/job/status":       {"定时任务", "启停任务"},
+	"/job/run":          {"定时任务", "手动执行"},
+	"/notice/create":    {"通知公告", "新增公告"},
+	"/notice/update":    {"通知公告", "修改公告"},
+	"/notice/delete":    {"通知公告", "删除公告"},
+	"/notice/publish":   {"通知公告", "发布公告"},
+	"/notice/revoke":    {"通知公告", "撤回公告"},
 }
 
 // recordOperationLog 记录管理写操作日志(登录/登出等认证接口除外)

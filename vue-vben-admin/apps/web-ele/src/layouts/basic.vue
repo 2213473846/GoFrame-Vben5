@@ -1,7 +1,8 @@
 <script lang="ts" setup>
+import type { MyNoticeItem } from '#/api/notice';
 import type { NotificationItem } from '@vben/layouts';
 
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 
 import { AuthenticationLoginExpiredModal } from '@vben/common-ui';
@@ -18,62 +19,92 @@ import { preferences, usePreferences } from '@vben/preferences';
 import { useAccessStore, useUserStore } from '@vben/stores';
 import { openWindow } from '@vben/utils';
 
+import { getMyNoticeListApi, getNoticeUnreadCountApi, readNoticeApi } from '#/api/notice';
 import { $t } from '#/locales';
 import { useAuthStore } from '#/store';
 import LoginForm from '#/views/_core/authentication/login.vue';
 
-const notifications = ref<NotificationItem[]>([
-  {
-    id: 1,
-    avatar: 'https://avatar.vercel.sh/vercel.svg?text=VB',
-    date: '3小时前',
-    isRead: true,
-    message: '描述信息描述信息描述信息',
-    title: '收到了 14 份新周报',
-  },
-  {
-    id: 2,
-    avatar: 'https://avatar.vercel.sh/1',
-    date: '刚刚',
-    isRead: false,
-    message: '描述信息描述信息描述信息',
-    title: '朱偏右 回复了你',
-  },
-  {
-    id: 3,
-    avatar: 'https://avatar.vercel.sh/1',
-    date: '2024-01-01',
-    isRead: false,
-    message: '描述信息描述信息描述信息',
-    title: '曲丽丽 评论了你',
-  },
-  {
-    id: 4,
-    avatar: 'https://avatar.vercel.sh/satori',
-    date: '1天前',
-    isRead: false,
-    message: '描述信息描述信息描述信息',
-    title: '代办提醒',
-  },
-  {
-    id: 5,
-    avatar: 'https://avatar.vercel.sh/satori',
-    date: '1天前',
-    isRead: false,
-    message: '描述信息描述信息描述信息',
-    title: '跳转Workspace示例',
-    link: '/workspace',
-  },
-  {
-    id: 6,
-    avatar: 'https://avatar.vercel.sh/satori',
-    date: '1天前',
-    isRead: false,
-    message: '描述信息描述信息描述信息',
-    title: '跳转外部链接示例',
-    link: 'https://doc.vben.pro',
-  },
-]);
+// 顶栏通知: 真实数据(最近 5 条) + 未读数轮询
+const notifications = ref<NotificationItem[]>([]);
+const unreadCount = ref(0);
+// 轮询间隔(秒), 由 /notice/unread-count 下发, 缺省 60
+const pollSeconds = ref(60);
+let pollTimer: ReturnType<typeof setInterval> | undefined;
+// 组件是否已卸载, 避免异步首屏请求返回后继续创建定时器
+let destroyed = false;
+
+// 未读数大于 0 才显示红点
+const showDot = computed(() => unreadCount.value > 0);
+
+/** 把用户端公告映射为顶栏通知组件所需结构 */
+function toNotificationItem(item: MyNoticeItem): NotificationItem {
+  return {
+    avatar: preferences.app.defaultAvatar,
+    date: item.publishAt || item.createdAt,
+    id: item.id,
+    isRead: item.isRead,
+    message: item.content,
+    title: item.title,
+    // 点击单条统一跳转「我的通知」页
+    link: '/notice',
+  };
+}
+
+async function loadNotifications() {
+  try {
+    const res = await getMyNoticeListApi({ page: 1, pageSize: 5 });
+    notifications.value = res.items.map(toNotificationItem);
+  } catch {
+    // 列表拉取失败时保留上次结果, 不阻塞布局
+  }
+}
+
+/**
+ * 刷新未读数; 未读发生变化时同步刷新列表
+ * @param loadListOnChange 未读数变化时是否重新拉取列表
+ */
+async function refreshUnread(loadListOnChange = true) {
+  try {
+    const res = await getNoticeUnreadCountApi();
+    const nextSeconds =
+      res.pollSeconds > 0 ? res.pollSeconds : 60;
+    if (nextSeconds !== pollSeconds.value) {
+      pollSeconds.value = nextSeconds;
+      // 后端配置变化时按新间隔重启轮询
+      if (pollTimer) startPolling();
+    }
+    if (res.count !== unreadCount.value) {
+      unreadCount.value = res.count;
+      if (loadListOnChange) {
+        await loadNotifications();
+      }
+    }
+  } catch {
+    // 轮询失败静默处理, 由下一轮自动重试
+  }
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = undefined;
+  }
+}
+
+function startPolling() {
+  stopPolling();
+  pollTimer = setInterval(() => {
+    refreshUnread();
+  }, pollSeconds.value * 1000);
+}
+
+// 页面从后台切回前台时立即刷新一次
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible') {
+    refreshUnread(false);
+    loadNotifications();
+  }
+}
 
 const router = useRouter();
 const userStore = useUserStore();
@@ -81,9 +112,6 @@ const authStore = useAuthStore();
 const accessStore = useAccessStore();
 const { destroyWatermark, updateWatermark } = useWatermark();
 const { isDark } = usePreferences();
-const showDot = computed(() =>
-  notifications.value.some((item) => !item.isRead),
-);
 
 const menus = computed(() => [
   {
@@ -131,50 +159,52 @@ async function handleLogout() {
 }
 
 function handleNoticeClear() {
+  // 仅清空当前展示, 真实未读状态仍由后端维护
   notifications.value = [];
 }
 
-function markRead(id: number | string) {
-  const item = notifications.value.find((item) => item.id === id);
-  if (item) {
-    item.isRead = true;
-  }
+async function markRead(id: number | string) {
+  const item = notifications.value.find((notice) => notice.id === id);
+  if (!item || item.isRead) return;
+  await readNoticeApi({ id: Number(id) });
+  item.isRead = true;
+  unreadCount.value = Math.max(0, unreadCount.value - 1);
 }
 
 function remove(id: number | string) {
   notifications.value = notifications.value.filter((item) => item.id !== id);
 }
 
-function handleMakeAll() {
+async function handleMakeAll() {
+  if (unreadCount.value <= 0) return;
+  await readNoticeApi({ all: true });
   notifications.value.forEach((item) => (item.isRead = true));
+  unreadCount.value = 0;
 }
 
-const viewAll = () => {};
-
-const handleClick = (item: NotificationItem) => {
-  // 如果通知项有链接，点击时跳转
-  if (item.link) {
-    navigateTo(item.link, item.query, item.state);
-  }
+const viewAll = () => {
+  router.push('/notice');
 };
 
-function navigateTo(
-  link: string,
-  query?: Record<string, any>,
-  state?: Record<string, any>,
-) {
-  if (link.startsWith('http://') || link.startsWith('https://')) {
-    // 外部链接，在新标签页打开
-    window.open(link, '_blank');
-  } else {
-    // 内部路由链接，支持 query 参数和 state
-    router.push({
-      path: link,
-      query: query || {},
-      state,
-    });
-  }
-}
+const handleClick = (item: NotificationItem) => {
+  // 点击单条: 先标记已读, 再进入「我的通知」页
+  void markRead(item.id);
+  router.push('/notice');
+};
+
+onMounted(async () => {
+  // 首屏同时拉取未读数与最近 5 条, 之后按后端下发间隔轮询
+  await Promise.all([refreshUnread(false), loadNotifications()]);
+  if (destroyed) return;
+  startPolling();
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+});
+
+onUnmounted(() => {
+  destroyed = true;
+  stopPolling();
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
+});
 
 watch(
   () => ({
@@ -239,7 +269,7 @@ watch(
         :dot="showDot"
         :notifications="notifications"
         @clear="handleNoticeClear"
-        @read="(item) => item.id && markRead(item.id)"
+        @read="(item) => markRead(item.id)"
         @remove="(item) => item.id && remove(item.id)"
         @make-all="handleMakeAll"
         @on-click="handleClick"

@@ -1,13 +1,30 @@
 <script lang="ts" setup>
 import type { DashboardOverview } from '#/api/dashboard';
+import type { DictFallbackItem } from '#/composables/useDict';
 
 import { computed, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 
-import { ElTable, ElTableColumn, ElTag } from 'element-plus';
+import {
+  ElButton,
+  ElTable,
+  ElTableColumn,
+  ElTag,
+} from 'element-plus';
 
 import { getDashboardOverviewApi } from '#/api/dashboard';
+import DictTag from '#/components/dict-tag/index.vue';
 
 defineOptions({ name: 'Dashboard' });
+
+// 公告级别字典兜底文案(字典未配置时回退)
+const levelFallback: Record<string, DictFallbackItem> = {
+  important: { label: '重要', tagColor: 'warning' },
+  normal: { label: '普通', tagColor: 'info' },
+  urgent: { label: '紧急', tagColor: 'danger' },
+};
+
+const router = useRouter();
 
 const loading = ref(false);
 const overview = ref<DashboardOverview>();
@@ -24,7 +41,14 @@ async function fetchOverview() {
   }
 }
 
-const cards = computed(() => [
+interface DashboardCard {
+  label: string;
+  /** 有链接的卡片可点击跳转 */
+  link?: string;
+  value: number;
+}
+
+const cards = computed<DashboardCard[]>(() => [
   {
     label: '用户总数',
     value: overview.value?.userTotal ?? 0,
@@ -40,6 +64,11 @@ const cards = computed(() => [
   {
     label: '今日登录失败',
     value: overview.value?.loginFailedToday ?? 0,
+  },
+  {
+    label: '未读公告',
+    link: '/notice',
+    value: overview.value?.unreadNoticeCount ?? 0,
   },
 ]);
 
@@ -60,6 +89,9 @@ function barPercent(value: number) {
 }
 
 const recent = computed(() => overview.value?.recent ?? []);
+
+// 最近公告(后端按当前用户可见范围返回, 最多 3 条)
+const recentNotices = computed(() => overview.value?.recentNotices ?? []);
 
 const scopeText = computed(() =>
   overview.value?.scope === 'all' ? '全量数据' : '仅本人及下属范围',
@@ -84,11 +116,13 @@ onMounted(fetchOverview);
     </div>
 
     <!-- 概览卡片 -->
-    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
       <div
         v-for="card in cards"
         :key="card.label"
         class="rounded-md border border-border bg-card p-4"
+        :class="card.link ? 'cursor-pointer hover:border-primary' : ''"
+        @click="card.link && router.push(card.link)"
       >
         <div class="text-sm text-gray-500">{{ card.label }}</div>
         <div class="mt-2 text-2xl font-semibold">{{ card.value }}</div>
@@ -141,6 +175,51 @@ onMounted(fetchOverview);
           <div class="text-xs text-gray-400">
             {{ point.success }}/{{ point.failed }}
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 最近公告 -->
+    <div class="mt-4 rounded-md border border-border bg-card p-4">
+      <div class="mb-3 flex items-center">
+        <div class="text-sm font-medium">最近公告</div>
+        <div class="flex-1"></div>
+        <ElButton link type="primary" @click="router.push('/notice')">
+          查看全部
+        </ElButton>
+      </div>
+      <div
+        v-if="recentNotices.length === 0"
+        class="py-6 text-center text-sm text-gray-400"
+      >
+        暂无公告
+      </div>
+      <div v-else class="flex flex-col">
+        <div
+          v-for="notice in recentNotices"
+          :key="notice.id"
+          class="flex cursor-pointer items-center gap-2 border-t border-border py-2 first:border-t-0 hover:bg-accent"
+          @click="router.push('/notice')"
+        >
+          <span
+            class="size-2 shrink-0 rounded-full"
+            :class="notice.isRead ? 'bg-transparent' : 'bg-primary'"
+          ></span>
+          <span
+            class="min-w-0 truncate text-sm"
+            :class="notice.isRead ? 'text-gray-500' : 'font-medium'"
+          >
+            {{ notice.title }}
+          </span>
+          <DictTag
+            type="notice_level"
+            :value="notice.level"
+            :fallback="levelFallback"
+          />
+          <div class="flex-1"></div>
+          <span class="shrink-0 text-xs text-gray-400">
+            {{ notice.publishAt }}
+          </span>
         </div>
       </div>
     </div>

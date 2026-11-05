@@ -211,3 +211,98 @@ CREATE TABLE IF NOT EXISTS `sys_config` (
     UNIQUE KEY `uk_config_key_deleted` (`config_key`, `deleted_at`),
     KEY `idx_name` (`name`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '系统参数配置表';
+
+-- ----------------------------
+-- 定时任务表
+-- invoke_target 为白名单标识(不是类名/命令), 仅允许注册表中的内置任务;
+-- 禁止按字符串反射执行, 避免演变成远程命令执行入口。
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `sys_job` (
+    `id`                 bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '任务ID',
+    `name`               varchar(64)  NOT NULL COMMENT '任务名称',
+    `job_group`          varchar(64)  NOT NULL DEFAULT 'default' COMMENT '任务分组',
+    `invoke_target`      varchar(128) NOT NULL COMMENT '白名单任务标识',
+    `cron_expression`    varchar(64)  NOT NULL COMMENT 'cron 表达式(5 段或 6 段)',
+    `status`             tinyint(4)   NOT NULL DEFAULT 1 COMMENT '状态: 1=启用 0=停用',
+    `concurrency_policy` tinyint(4)   NOT NULL DEFAULT 0 COMMENT '并发策略: 1=允许并发 0=禁止并发(上次未完成则跳过)',
+    `timeout_seconds`    int(11)      NOT NULL DEFAULT 60 COMMENT '执行超时秒数, 0=不限制',
+    `remark`             varchar(255) NOT NULL DEFAULT '' COMMENT '备注',
+    `last_run_at`        datetime DEFAULT NULL COMMENT '最近执行时间',
+    `last_result`        varchar(128) NOT NULL DEFAULT '' COMMENT '最近执行结果文案',
+    `next_run_at`        datetime DEFAULT NULL COMMENT '下次执行时间(gcron 未暴露计算接口时留空)',
+    `created_at`         datetime DEFAULT NULL COMMENT '创建时间',
+    `updated_at`         datetime DEFAULT NULL COMMENT '更新时间',
+    `deleted_at`         datetime DEFAULT NULL COMMENT '删除时间(软删除)',
+    PRIMARY KEY (`id`),
+    KEY `idx_name` (`name`),
+    KEY `idx_status` (`status`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '定时任务表';
+
+-- ----------------------------
+-- 定时任务执行日志表
+-- message 同时承载执行结果摘要(成功时记录处理条数)与失败原因。
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `sys_job_log` (
+    `id`            bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `job_id`        bigint(20) unsigned NOT NULL DEFAULT 0 COMMENT '任务ID',
+    `job_name`      varchar(64)  NOT NULL DEFAULT '' COMMENT '任务名称(冗余, 任务删除后仍可追溯)',
+    `trigger_type`  tinyint(4)   NOT NULL DEFAULT 1 COMMENT '触发方式: 1=定时 2=手动',
+    `started_at`    datetime DEFAULT NULL COMMENT '开始时间',
+    `finished_at`   datetime DEFAULT NULL COMMENT '结束时间',
+    `duration_ms`   bigint(20)   NOT NULL DEFAULT 0 COMMENT '执行耗时(毫秒)',
+    `status`        tinyint(4)   NOT NULL DEFAULT 1 COMMENT '执行状态: 1=成功 0=失败',
+    `message`      text         NULL COMMENT '执行结果摘要/失败原因',
+    `created_at`    datetime DEFAULT NULL COMMENT '创建时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_job_id` (`job_id`),
+    KEY `idx_started_at` (`started_at`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '定时任务执行日志表';
+
+-- ----------------------------
+-- 通知公告表
+-- 内容只存纯文本(入库前剥离 HTML 标签), 前端必须使用文本插值渲染, 禁止 v-html。
+-- target_scope: 1=全员可见 2=仅 sys_notice_user 中的指定用户可见。
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `sys_notice` (
+    `id`           bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '公告ID',
+    `title`        varchar(128) NOT NULL COMMENT '标题',
+    `content`      text         NOT NULL COMMENT '正文(纯文本, 不含HTML)',
+    `notice_type`  varchar(32)  NOT NULL DEFAULT '' COMMENT '类型(字典 notice_type 的值)',
+    `notice_level` varchar(32)  NOT NULL DEFAULT '' COMMENT '级别(字典 notice_level 的值)',
+    `status`       tinyint(4)   NOT NULL DEFAULT 0 COMMENT '状态: 0=草稿 1=已发布 2=已撤回',
+    `target_scope` tinyint(4)   NOT NULL DEFAULT 1 COMMENT '可见范围: 1=全员 2=指定用户',
+    `publisher_id` bigint(20) unsigned NOT NULL DEFAULT 0 COMMENT '发布人ID',
+    `publish_at`   datetime DEFAULT NULL COMMENT '发布时间',
+    `expire_at`    datetime DEFAULT NULL COMMENT '失效时间, 空表示永不过期',
+    `created_at`   datetime DEFAULT NULL COMMENT '创建时间',
+    `updated_at`   datetime DEFAULT NULL COMMENT '更新时间',
+    `deleted_at`   datetime DEFAULT NULL COMMENT '删除时间(软删除)',
+    PRIMARY KEY (`id`),
+    KEY `idx_status` (`status`, `deleted_at`),
+    KEY `idx_publish_at` (`publish_at`),
+    KEY `idx_publisher` (`publisher_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '通知公告表';
+
+-- ----------------------------
+-- 公告定向用户表(仅 target_scope=2 时写入)
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `sys_notice_user` (
+    `id`         bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `notice_id`  bigint(20) unsigned NOT NULL COMMENT '公告ID',
+    `user_id`    bigint(20) unsigned NOT NULL COMMENT '接收用户ID',
+    `created_at` datetime DEFAULT NULL COMMENT '创建时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_notice_user` (`notice_id`, `user_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '公告定向用户表';
+
+-- ----------------------------
+-- 公告阅读记录表
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `sys_notice_read` (
+    `id`         bigint(20) unsigned NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `notice_id`  bigint(20) unsigned NOT NULL COMMENT '公告ID',
+    `user_id`    bigint(20) unsigned NOT NULL COMMENT '用户ID',
+    `read_at`    datetime DEFAULT NULL COMMENT '阅读时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_notice_user` (`notice_id`, `user_id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '公告阅读记录表';

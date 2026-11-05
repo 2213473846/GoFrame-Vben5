@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { SystemRoleItem } from '#/api/system/role';
 
-import { onMounted, reactive, ref } from 'vue';
+import { nextTick, onMounted, reactive, ref } from 'vue';
 
 import {
   ElButton,
@@ -144,6 +144,8 @@ async function openGrant(row: SystemRoleItem) {
     const res = await getRoleGrantInfoApi(row.id);
     grantMenus.value = res.items ?? [];
     grantChecked.value = res.checkedIds ?? [];
+    // 等待树节点渲染完成后再设置勾选, 否则勾选状态会丢失
+    await nextTick();
     grantTree.value?.setCheckedKeys(grantChecked.value, false);
   } finally {
     grantLoading.value = false;
@@ -255,6 +257,7 @@ onMounted(fetchList);
           :data="grantMenus"
           node-key="id"
           show-checkbox
+          check-strictly
           default-expand-all
           :props="{ label: 'title', children: 'children' }"
         />

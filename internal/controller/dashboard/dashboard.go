@@ -32,6 +32,8 @@ func (c *ControllerV1) Overview(ctx context.Context, req *v1.OverviewReq) (res *
 		TrendDays:         data.TrendDays,
 		Trend:             make([]v1.TrendPoint, 0, len(data.Trend)),
 		Recent:            make([]v1.RecentItem, 0, len(data.Recent)),
+		UnreadNoticeCount: data.UnreadNoticeCount,
+		RecentNotices:     make([]v1.NoticeBrief, 0, len(data.RecentNotices)),
 	}
 	for _, p := range data.Trend {
 		out.Trend = append(out.Trend, v1.TrendPoint{Date: p.Date, Success: p.Success, Failed: p.Failed})
@@ -40,6 +42,12 @@ func (c *ControllerV1) Overview(ctx context.Context, req *v1.OverviewReq) (res *
 		out.Recent = append(out.Recent, v1.RecentItem{
 			Id: item.Id, Username: item.Username, Module: item.Module,
 			Action: item.Action, Status: item.Status, Ip: item.Ip, CreatedAt: item.CreatedAt,
+		})
+	}
+	for _, item := range data.RecentNotices {
+		out.RecentNotices = append(out.RecentNotices, v1.NoticeBrief{
+			Id: item.Id, Title: item.Title, Level: item.Level,
+			PublishAt: item.PublishAt, IsRead: item.IsRead,
 		})
 	}
 	return out, nil

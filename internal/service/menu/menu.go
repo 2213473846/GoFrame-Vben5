@@ -1220,28 +1220,29 @@ func (s *Service) SeedConfig(ctx context.Context) (err error) {
 }
 
 // SeedDashboard 初始化工作台菜单(幂等, 服务启动时调用)
-// 顶级菜单, 默认只下发给超管与存量管理员; 普通用户不展示管理统计卡片
+// 仅在菜单首次创建时下发给存量管理员; 菜单已存在时不补授权, 由超管在界面上管理
 func (s *Service) SeedDashboard(ctx context.Context) (err error) {
 	cols := dao.SysMenu.Columns()
 	count, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "Dashboard").Count()
 	if err != nil {
 		return gerror.Wrap(err, "初始化工作台菜单失败")
 	}
-	if count == 0 {
-		if _, err = dao.SysMenu.Ctx(ctx).Data(do.SysMenu{
-			Pid:       0,
-			Name:      "Dashboard",
-			Path:      "/dashboard",
-			Component: "/dashboard/index",
-			Type:      TypeMenu,
-			Title:     "工作台",
-			Icon:      "lucide:layout-dashboard",
-			Sort:      1,
-			Status:    1,
-			Remark:    "系统内置",
-		}).Insert(); err != nil {
-			return gerror.Wrap(err, "初始化工作台菜单失败")
-		}
+	if count > 0 {
+		return nil
+	}
+	if _, err = dao.SysMenu.Ctx(ctx).Data(do.SysMenu{
+		Pid:       0,
+		Name:      "Dashboard",
+		Path:      "/dashboard",
+		Component: "/dashboard/index",
+		Type:      TypeMenu,
+		Title:     "工作台",
+		Icon:      "lucide:layout-dashboard",
+		Sort:      1,
+		Status:    1,
+		Remark:    "系统内置",
+	}).Insert(); err != nil {
+		return gerror.Wrap(err, "初始化工作台菜单失败")
 	}
 	dashboardId, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "Dashboard").Value(cols.Id)
 	if err != nil {
@@ -1250,7 +1251,7 @@ func (s *Service) SeedDashboard(ctx context.Context) (err error) {
 	if dashboardId.IsNil() || dashboardId.Int64() == 0 {
 		return nil
 	}
-	// 每次启动都对存量管理员补授权(InsertIgnore 幂等), 覆盖"菜单已存在但新管理员没有授权"的情况
+	// 首次创建时下发给存量管理员(InsertIgnore 防止重复授权)
 	var admins []*entity.SysUser
 	if err = dao.SysUser.Ctx(ctx).Where(dao.SysUser.Columns().Role, consts.RoleAdmin).Scan(&admins); err != nil {
 		return gerror.Wrap(err, "初始化工作台菜单授权失败")
@@ -1264,6 +1265,198 @@ func (s *Service) SeedDashboard(ctx context.Context) (err error) {
 	}
 	if _, err = dao.SysUserMenu.Ctx(ctx).Data(records).InsertIgnore(); err != nil {
 		return gerror.Wrap(err, "初始化工作台菜单授权失败")
+	}
+	return nil
+}
+
+// SeedMonitorServer 初始化「服务监控」子菜单(幂等, 服务启动时调用)
+// 注意: 接口仅超级管理员可访问; 菜单仍按既有约定下发给存量管理员,
+// 管理员点击后由前端提示"无权查看"(后端返回 403), 而不是把菜单隐藏掉。
+func (s *Service) SeedMonitorServer(ctx context.Context) (err error) {
+	return s.seedMonitorChild(ctx, "MonitorServer", do.SysMenu{
+		Path:      "server",
+		Component: "/monitor/server/index",
+		Title:     "服务监控",
+		Icon:      "lucide:server",
+		Sort:      2,
+	}, "初始化服务监控菜单失败")
+}
+
+// SeedMonitorJob 初始化「定时任务」子菜单(幂等, 服务启动时调用)
+// 管理员可查看列表与日志(只读), 写操作仅超级管理员。
+func (s *Service) SeedMonitorJob(ctx context.Context) (err error) {
+	return s.seedMonitorChild(ctx, "MonitorJob", do.SysMenu{
+		Path:      "job",
+		Component: "/monitor/job/index",
+		Title:     "定时任务",
+		Icon:      "lucide:timer",
+		Sort:      3,
+	}, "初始化定时任务菜单失败")
+}
+
+// SeedNotice 初始化「通知公告」菜单(幂等, 服务启动时调用)
+// 二级菜单: 系统管理/通知公告; 仅在菜单首次创建时下发给存量管理员
+func (s *Service) SeedNotice(ctx context.Context) (err error) {
+	cols := dao.SysMenu.Columns()
+	count, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "SystemNotice").Count()
+	if err != nil {
+		return gerror.Wrap(err, "初始化通知公告菜单失败")
+	}
+	// 仅在菜单首次创建时授权; 菜单已存在时不补授权, 由超管在界面上管理
+	if count > 0 {
+		return nil
+	}
+	sysId, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "System").Value(cols.Id)
+	if err != nil {
+		return gerror.Wrap(err, "初始化通知公告菜单失败")
+	}
+	if sysId.IsNil() || sysId.Int64() == 0 {
+		// 系统管理目录不存在(可能被删除), 跳过本次初始化
+		return nil
+	}
+	if _, err = dao.SysMenu.Ctx(ctx).Data(do.SysMenu{
+		Pid:       gconv.Uint64(sysId),
+		Name:      "SystemNotice",
+		Path:      "notice",
+		Component: "/system/notice/index",
+		Type:      TypeMenu,
+		Title:     "通知公告",
+		Icon:      "lucide:megaphone",
+		Sort:      6,
+		Status:    1,
+		Remark:    "系统内置",
+	}).Insert(); err != nil {
+		return gerror.Wrap(err, "初始化通知公告菜单失败")
+	}
+	menuId, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "SystemNotice").Value(cols.Id)
+	if err != nil {
+		return gerror.Wrap(err, "初始化通知公告菜单失败")
+	}
+	if menuId.IsNil() || menuId.Int64() == 0 {
+		return nil
+	}
+	// 首次创建时下发给存量管理员(InsertIgnore 防止重复授权)
+	var admins []*entity.SysUser
+	if err = dao.SysUser.Ctx(ctx).Where(dao.SysUser.Columns().Role, consts.RoleAdmin).Scan(&admins); err != nil {
+		return gerror.Wrap(err, "初始化通知公告菜单授权失败")
+	}
+	if len(admins) == 0 {
+		return nil
+	}
+	records := make([]do.SysUserMenu, 0, len(admins)*2)
+	for _, a := range admins {
+		records = append(records, do.SysUserMenu{UserId: a.Id, MenuId: gconv.Uint64(menuId)})
+		if !sysId.IsNil() && sysId.Int64() > 0 {
+			records = append(records, do.SysUserMenu{UserId: a.Id, MenuId: gconv.Uint64(sysId)})
+		}
+	}
+	if _, err = dao.SysUserMenu.Ctx(ctx).Data(records).InsertIgnore(); err != nil {
+		return gerror.Wrap(err, "初始化通知公告菜单授权失败")
+	}
+	return nil
+}
+
+// SeedMyNotice 初始化顶级「我的通知」菜单(幂等, 服务启动时调用)
+// 仅在菜单首次创建时对全部存量角色(admin、user)授权, 超管天然可见全部菜单
+func (s *Service) SeedMyNotice(ctx context.Context) (err error) {
+	cols := dao.SysMenu.Columns()
+	count, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "MyNotice").Count()
+	if err != nil {
+		return gerror.Wrap(err, "初始化我的通知菜单失败")
+	}
+	// 仅在菜单首次创建时授权; 菜单已存在时不补授权, 由超管在界面上管理
+	if count > 0 {
+		return nil
+	}
+	if _, err = dao.SysMenu.Ctx(ctx).Data(do.SysMenu{
+		Pid:       0,
+		Name:      "MyNotice",
+		Path:      "/notice",
+		Component: "/notice/index",
+		Type:      TypeMenu,
+		Title:     "我的通知",
+		Icon:      "lucide:bell",
+		Sort:      2,
+		Status:    1,
+		Remark:    "系统内置",
+	}).Insert(); err != nil {
+		return gerror.Wrap(err, "初始化我的通知菜单失败")
+	}
+	menuId, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "MyNotice").Value(cols.Id)
+	if err != nil {
+		return gerror.Wrap(err, "初始化我的通知菜单失败")
+	}
+	if menuId.IsNil() || menuId.Int64() == 0 {
+		return nil
+	}
+	// 首次创建时对存量 admin/user 授权(InsertIgnore 幂等)
+	var users []*entity.SysUser
+	if err = dao.SysUser.Ctx(ctx).
+		WhereIn(dao.SysUser.Columns().Role, []string{consts.RoleAdmin, consts.RoleUser}).
+		Scan(&users); err != nil {
+		return gerror.Wrap(err, "初始化我的通知菜单授权失败")
+	}
+	if len(users) == 0 {
+		return nil
+	}
+	records := make([]do.SysUserMenu, 0, len(users))
+	for _, u := range users {
+		records = append(records, do.SysUserMenu{UserId: u.Id, MenuId: gconv.Uint64(menuId)})
+	}
+	if _, err = dao.SysUserMenu.Ctx(ctx).Data(records).InsertIgnore(); err != nil {
+		return gerror.Wrap(err, "初始化我的通知菜单授权失败")
+	}
+	return nil
+}
+
+// seedMonitorChild 在系统监控父菜单下幂等插入子菜单, 仅在子菜单首次创建时对存量管理员授权
+func (s *Service) seedMonitorChild(ctx context.Context, name string, menu do.SysMenu, errMsg string) error {
+	cols := dao.SysMenu.Columns()
+	parentId, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, "SysMonitor").Value(cols.Id)
+	if err != nil {
+		return gerror.Wrap(err, errMsg)
+	}
+	if parentId.IsNil() || parentId.Int64() == 0 {
+		// 父菜单尚未初始化(理论上 SeedMonitor 已保证), 这里安全跳过
+		return nil
+	}
+	count, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, name).Count()
+	if err != nil {
+		return gerror.Wrap(err, errMsg)
+	}
+	// 仅在子菜单首次创建时授权; 菜单已存在时不补授权, 由超管在界面上管理
+	if count > 0 {
+		return nil
+	}
+	menu.Pid = gconv.Uint64(parentId)
+	menu.Name = name
+	menu.Type = TypeMenu
+	menu.Status = 1
+	menu.Remark = "系统内置"
+	if _, err = dao.SysMenu.Ctx(ctx).Data(menu).Insert(); err != nil {
+		return gerror.Wrap(err, errMsg)
+	}
+	menuId, err := dao.SysMenu.Ctx(ctx).Where(cols.Name, name).Value(cols.Id)
+	if err != nil {
+		return gerror.Wrap(err, errMsg)
+	}
+	if menuId.IsNil() || menuId.Int64() == 0 {
+		return nil
+	}
+	// 首次创建时对存量管理员授权(InsertIgnore 幂等)
+	var admins []*entity.SysUser
+	if err = dao.SysUser.Ctx(ctx).Where(dao.SysUser.Columns().Role, consts.RoleAdmin).Scan(&admins); err != nil {
+		return gerror.Wrap(err, errMsg+"(授权)")
+	}
+	if len(admins) == 0 {
+		return nil
+	}
+	records := make([]do.SysUserMenu, 0, len(admins))
+	for _, a := range admins {
+		records = append(records, do.SysUserMenu{UserId: a.Id, MenuId: gconv.Uint64(menuId)})
+	}
+	if _, err = dao.SysUserMenu.Ctx(ctx).Data(records).InsertIgnore(); err != nil {
+		return gerror.Wrap(err, errMsg+"(授权)")
 	}
 	return nil
 }

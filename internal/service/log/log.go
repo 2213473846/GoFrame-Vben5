@@ -533,6 +533,44 @@ func descendantUserIds(ctx context.Context, rootId uint64) ([]uint64, error) {
 }
 
 // ============================================================
+// 日志清理(供定时任务 clearlog 与 utility/clearlog 复用)
+// ============================================================
+
+// ClearResult 日志清理结果(被物理删除的记录条数)
+type ClearResult struct {
+	LoginLogCount     int64 // 登录日志删除条数
+	OperationLogCount int64 // 操作日志删除条数
+}
+
+// ClearExpired 物理删除早于"保留天数"的登录日志与操作日志
+// 注意: sys_login_log / sys_operation_log 没有 deleted_at 软删字段, 这里必须物理删除。
+func (s *Service) ClearExpired(ctx context.Context, retainDays int) (*ClearResult, error) {
+	if retainDays < 1 {
+		return nil, gerror.NewCode(consts.CodeBadRequest, "日志保留天数必须大于 0")
+	}
+	cutoff := gtime.New(time.Now().AddDate(0, 0, -retainDays))
+	loginCols := dao.SysLoginLog.Columns()
+	opCols := dao.SysOperationLog.Columns()
+	result, err := dao.SysLoginLog.Ctx(ctx).WhereLT(loginCols.CreatedAt, cutoff).Delete()
+	if err != nil {
+		return nil, gerror.Wrap(err, "清理登录日志失败")
+	}
+	loginDeleted, err := result.RowsAffected()
+	if err != nil {
+		return nil, gerror.Wrap(err, "清理登录日志失败")
+	}
+	result, err = dao.SysOperationLog.Ctx(ctx).WhereLT(opCols.CreatedAt, cutoff).Delete()
+	if err != nil {
+		return nil, gerror.Wrap(err, "清理操作日志失败")
+	}
+	opDeleted, err := result.RowsAffected()
+	if err != nil {
+		return nil, gerror.Wrap(err, "清理操作日志失败")
+	}
+	return &ClearResult{LoginLogCount: loginDeleted, OperationLogCount: opDeleted}, nil
+}
+
+// ============================================================
 // 导出封装(供在线用户等其他模块复用)
 // ============================================================
 
